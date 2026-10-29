@@ -1,0 +1,148 @@
+from graphq import dependency_edges, firing, unhealthy, vertices
+from sentinel.db import attrs
+from sentinel.seed.scenarios import inject_scenario
+from sentinel.tools.actions import execute_action, propose_action, reject_action
+from sentinel.tools.incidents import conclude_incident, open_incident
+from sentinel.tools.memory import recall_similar
+
+
+def test_propose_changes_nothing_until_approved(graph):
+    inject_scenario("db-pool-exhaustion", graph, fresh=True)
+    before = unhealthy(graph)
+    out = propose_action("rollback", "inventory-db-proxy", "pool size cut", graph=graph)
+    assert out["result"]["action"]["status"] == "pending"
+    assert out["result"]["action"]["target_uid"] == "dep:inventory-db-proxy:v4.2.0"
+    assert unhealthy(graph) == before
+
+
+def test_rollback_recovers_everything_and_resolves_incident(graph):
+    inject_scenario("db-pool-exhaustion", graph, fresh=True)
+    inc = open_incident("run-a", graph)
+    act = propose_action("rollback", "inventory-db-proxy", "pool size cut", run_id="run-a", graph=graph)
+    conclude_incident("run-a", "inventory-db-proxy", "v4.2.0 cut the pool", 7, graph=graph)
+    out = execute_action(act["result"]["action"]["uid"], graph=graph)
+    assert unhealthy(graph) == set()
+    assert firing(graph) == 0
+    assert out["resolved_incidents"] == [inc["id"]]
+    dep = attrs(graph, "Deployment", "dep:inventory-db-proxy:v4.2.0")["status"]
+    assert dep == "rolled_back"
+
+
+def test_rollback_refused_without_recent_deploy(graph):
+    inject_scenario("cache-stampede", graph, fresh=True)
+    assert propose_action("rollback", "redis-cache", "x", graph=graph)["error"] == "no_recent_deploy"
+
+
+def test_breaker_isolates_then_scale_up_heals(graph):
+    inject_scenario("cache-stampede", graph, fresh=True)
+    b = propose_action("open_breaker", "redis-cache", "isolate", graph=graph)["result"]["action"]["uid"]
+    out = execute_action(b, graph=graph)
+    assert set(out["recovered"]) == {"svc:search-service", "svc:recommendations"}
+    assert unhealthy(graph) == {"redis-cache"}
+    s = propose_action("scale_up", "redis-cache", "capacity", graph=graph)["result"]["action"]["uid"]
+    execute_action(s, graph=graph)
+    assert unhealthy(graph) == set()
+    assert [e for e in dependency_edges(graph) if e["attributes"]["breaker"] == "open"] == []
+
+
+def test_symptom_recovers_only_after_root(graph):
+    inject_scenario("bad-config-push", graph, fresh=True)
+    page = propose_action("page_oncall", "feature-flags", "flag push", graph=graph)["result"]["action"]["uid"]
+    out = execute_action(page, graph=graph)
+    assert out["recovered"] == [] and "Priya" in out["outcome"]
+    fix = propose_action("rollback", "feature-flags", "flag push", graph=graph)["result"]["action"]["uid"]
+    execute_action(fix, graph=graph)
+    assert unhealthy(graph) == set()
+
+
+def test_reject_and_double_execute(graph):
+    inject_scenario("db-pool-exhaustion", graph, fresh=True)
+    uid = propose_action("scale_up", "inventory-db-proxy", "x", graph=graph)["result"]["action"]["uid"]
+    assert reject_action(uid, graph=graph)["status"] == "rejected"
+    assert execute_action(uid, graph=graph)["error"] == "not_pending"
+    assert propose_action("reboot", "inventory-db-proxy", "x", graph=graph)["error"] == "bad_kind"
+
+
+def test_learned_incident_is_recalled_after_soft_reset(graph):
+    inject_scenario("kafka-rebalance-storm", graph, fresh=True)
+    services = ["inventory-service", "notifications", "payments-api"]
+    assert all(i["root_cause_service"] != "kafka-bus" for i in recall_similar(services, graph)["result"]["incidents"])
+    inc = open_incident("run-k", graph)
+    act = propose_action("rollback", "kafka-bus", "partition change", run_id="run-k", graph=graph)
+    conclude_incident("run-k", "kafka-bus", "rebalance storm after v4.1.0", 9, graph=graph)
+    execute_action(act["result"]["action"]["uid"], graph=graph)
+
+    inject_scenario("kafka-rebalance-storm", graph)  # soft reset keeps memory
+    top = recall_similar(services, graph)["result"]["incidents"][0]
+    assert top["id"] == inc["id"]
+    assert top["root_cause_service"] == "kafka-bus"
+    assert top["fixes"] == ["rollback"] and top["steps_taken"] == 9
+
+
+def test_paging_does_not_heal_a_root_that_alerts_on_itself(graph):
+    from sentinel.seed.scenarios import inject_chaos
+
+    inject_scenario("db-pool-exhaustion", graph, fresh=True)
+    inject_chaos("cdn-edge", "down", True, graph)  # nothing calls cdn-edge, so it alerts on itself
+    page = propose_action("page_oncall", "cdn-edge", "x", graph=graph)["result"]["action"]["uid"]
+    assert execute_action(page, graph=graph)["recovered"] == []
+    assert unhealthy(graph) == {"cdn-edge"} and firing(graph) == 1
+    fix = propose_action("rollback", "cdn-edge", "x", graph=graph)["result"]["action"]["uid"]
+    execute_action(fix, graph=graph)
+    assert unhealthy(graph) == set() and firing(graph) == 0
+
+
+def test_concurrent_approvals_execute_once(graph):
+    import threading
+
+    inject_scenario("db-pool-exhaustion", graph, fresh=True)
+    uid = propose_action("page_oncall", "inventory-db-proxy", "x", graph=graph)["result"]["action"]["uid"]
+    results: list[dict] = []
+    threads = [threading.Thread(target=lambda: results.append(execute_action(uid, graph=graph))) for _ in range(6)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert sum(1 for r in results if "error" not in r) == 1
+    assert len(vertices(graph, "Page")) == 1
+
+
+def test_action_executors_and_adapters(monkeypatch):
+    from sentinel.tools.actions import DryRunExecutor, GitHubExecutor, KubernetesExecutor, get_executor
+
+    dry = DryRunExecutor()
+    ok, msg = dry.rollback("cartservice", "dep:cartservice:v1.2.0")
+    assert ok and "dry-run" in msg
+
+    monkeypatch.setenv("ACTION_ADAPTER", "kubernetes")
+    monkeypatch.setenv("KUBECTL_BIN", "kubectl")
+    k8s = get_executor()
+    assert isinstance(k8s, KubernetesExecutor)
+    ok, msg = k8s.rollback("cartservice", "dep:cartservice:v1.2.0", live=False)
+    assert ok and "kubectl rollout undo deployment/cartservice" in msg
+
+    monkeypatch.setenv("ACTION_ADAPTER", "github")
+    monkeypatch.setenv("GITHUB_REPO", "myorg/myrepo")
+    gh = get_executor()
+    assert isinstance(gh, GitHubExecutor)
+    ok, msg = gh.rollback("cartservice", "dep:cartservice:v1.2.0", live=False)
+    assert ok and "gh workflow run" in msg
+
+
+def test_pagerduty_notification(monkeypatch):
+    from sentinel.tools.actions import _send_pagerduty
+
+    # When no routing key is set, returns False cleanly
+    monkeypatch.delenv("PAGERDUTY_ROUTING_KEY", raising=False)
+    assert _send_pagerduty("incident alert", "cartservice") is False
+
+    # Mock urllib.request.urlopen for PagerDuty
+    monkeypatch.setenv("PAGERDUTY_ROUTING_KEY", "pd-test-key-123")
+
+    class MockResp:
+        status = 202
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+
+    import urllib.request
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: MockResp())
+    assert _send_pagerduty("incident alert", "cartservice") is True
+
