@@ -1,0 +1,7 @@
+fastapi==0.143.2
+httpx==0.28.1
+mcp==2.3.0
+pytest==9.1.1
+python-dotenv==1.2.1
+pyTigerGraph==2.0.5
+uvicorn[standard]==0.54.0
