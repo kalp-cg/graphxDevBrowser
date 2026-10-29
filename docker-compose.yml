@@ -1,0 +1,35 @@
+# Full stack: docker compose up --build   ->   UI http://localhost:3001 · API http://localhost:8100
+# The graph lives in TigerGraph Cloud (TG_HOST / TG_SECRET / TG_GRAPH from .env); nothing graph-related runs locally.
+services:
+  backend:
+    build: ./backend
+    environment:
+      TG_HOST: ${TG_HOST}
+      TG_SECRET: ${TG_SECRET:-}
+      TG_TOKEN: ${TG_TOKEN:-}
+      TG_GRAPH: ${TG_GRAPH:-Sentinel}
+      # ollama (on the host) | gemini | openai | autopilot (no LLM needed)
+      LLM_PROVIDER: ${LLM_PROVIDER:-autopilot}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PAGER_WEBHOOK_URL: ${PAGER_WEBHOOK_URL:-}
+      CORS_ORIGINS: http://localhost:3001
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-dev-admin-token}   # local default; set your own for anything public
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8100:8100"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8100}
+    depends_on:
+      - backend
+    ports:
+      - "3001:3001"

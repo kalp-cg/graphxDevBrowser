@@ -1,0 +1,29 @@
+# Render Blueprint: New > Blueprint > pick this repo. Secrets (sync: false) are asked for at creation.
+services:
+  - type: web
+    name: sentinelgraph-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    region: singapore          # pick the Render region closest to the TigerGraph Cloud instance
+    healthCheckPath: /api/health
+    envVars:
+      - key: TG_HOST
+        sync: false           # https://<id>.i.tgcloud.io
+      - key: TG_SECRET
+        sync: false
+      - key: TG_GRAPH
+        value: Sentinel
+      - key: LLM_PROVIDER
+        value: gemini           # a real model; autopilot takes over if it fails
+      - key: LLM_MODEL
+        value: gemini-3.1-flash-lite
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false           # the Vercel URL, e.g. https://graph-hacks-alpha.vercel.app
+      - key: AUTOPILOT_DELAY_S
+        value: "0.9"

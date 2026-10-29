@@ -1,0 +1,38 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Local data
+*.rdb
+dump.rdb
+
+# DevBrowser build outputs & caches
+DevBrowser/dist/
+DevBrowser/dist-electron/
+DevBrowser/build/
+DevBrowser/release/
+DevBrowser/coverage/
+DevBrowser/*.lcov
+DevBrowser/.nyc_output/
