@@ -171,6 +171,48 @@ def test_scan_maps_the_modules_of_a_monolith(tmp_path, compose):
     assert m["source"].endswith("+ code imports")
     if compose:
         assert m["aliases"]["localhost:3000"] == "app"  # browser traffic lands on a module that exists
+        assert m["aliases"]["localhost:3000/api/orders"] == "api.orders"  # ...and an API route on its own module
+        assert workspace.resolve("http://localhost:3000/api/orders/9?x=1", m["aliases"]) == "api.orders"
+        assert workspace.resolve("http://localhost:3000/api/unknown", m["aliases"]) == "app"
+        assert workspace.resolve("http://localhost:3000/cart", m["aliases"]) == "app"
+
+
+def test_a_page_calling_its_own_backend_is_still_evidence():
+    """One origin serves the page and the API (Next.js, Django, Rails)."""
+    aliases = {"localhost:3000": "app", "localhost:3000/api/orders": "api.orders"}
+    rec = lambda url, status: {"pageUrl": "http://localhost:3000/", "url": url, "method": "POST", "statusCode": status,
+                               "mimeType": "application/json", "startTime": 1, "endTime": 2}
+    out = to_otlp([rec("http://localhost:3000/api/orders/9", 500), rec("http://localhost:3000/api/health", 200)], aliases)
+    by_service = {r["resource"]["attributes"][0]["value"]["stringValue"]: r["scopeSpans"][0]["spans"]
+                  for r in out["resourceSpans"]}
+    assert set(by_service) == {"api.orders", "app"}  # no `web:` app: the page is the app
+    # A route with its own module is a call from the app to it, and its 5xx is that module's failure.
+    assert [(sp["kind"], sp["status"]["code"]) for sp in by_service["api.orders"]] == [(2, 2)]
+    # A route no module owns is the app calling itself: no edge, but still a server span (evidence) with no parent.
+    own = [sp for sp in by_service["app"] if sp["kind"] == 2]
+    assert [(sp["status"]["code"], sp["parentSpanId"]) for sp in own] == [(0, "")]
+    assert sum(1 for sp in by_service["app"] if sp["kind"] == 3) == 1  # the one real call, to api.orders
+
+    # With no module routes at all, a failing same-origin request must not vanish.
+    only_app = to_otlp([rec("http://localhost:3000/api/orders/9", 502)], {"localhost:3000": "app"})
+    spans = only_app["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    assert [(sp["kind"], sp["status"]["code"], sp["parentSpanId"]) for sp in spans] == [(2, 2, "")]
+
+
+def test_investigating_a_failed_request_on_a_monolith(api, tmp_path):
+    _nextjs_monolith(tmp_path, True)
+    assert api.post("/api/workspace", json=codebase.scan(tmp_path)).status_code == 200
+    ev = {"url": "http://localhost:3000/api/orders/9?token=x", "method": "POST", "status_code": 500,
+          "page_url": "http://localhost:3000/orders"}
+    with api.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        api.post("/api/runs", json={"provider": "autopilot", "evidence": [ev]})
+        events = []
+        while not events or events[-1]["type"] not in ("final", "error"):
+            events.append(ws.receive_json())
+    started = next(e for e in events if e["type"] == "run_started")
+    assert "(service `api.orders`) returned 500" in started["question"]
+    assert events[-1]["type"] == "final" and events[-1]["root_cause"] == "api.orders"
 
 
 def test_a_folder_named_like_the_service_is_not_the_service(tmp_path):
@@ -205,7 +247,7 @@ def test_browser_traffic_lands_on_scanned_services():
 def api(graph, monkeypatch):
     monkeypatch.setenv("TG_GRAPH", TEST_GRAPH)  # the agent's MCP tool server is a subprocess
     for target in ("sentinel.api.main.get_graph", "sentinel.api.graph_view.get_graph",
-                   "sentinel.tools.common.get_graph"):
+                   "sentinel.tools.common.get_graph", "sentinel.seed.scenarios.get_graph"):
         monkeypatch.setattr(target, lambda name=None: graph)
     from sentinel.api.main import app
 
@@ -294,6 +336,98 @@ def test_scan_maps_a_host_folder_to_where_the_container_mounts_it(api, monkeypat
     monkeypatch.setenv("SENTINEL_PROJECTS_MOUNT", str(SHOP.parent))
     assert api.post("/api/workspace/scan", json={"path": "/Users/dev/code/shop"}).json()["repo"] == "shop"
     assert api.post("/api/workspace/scan", json={"path": "/Users/dev/other"}).status_code == 422  # outside the mount
+
+
+def _investigate(api, evidence=None):
+    with api.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        api.post("/api/runs", json={"provider": "autopilot", **({"evidence": evidence} if evidence else {})})
+        events = []
+        while not events or events[-1]["type"] not in ("final", "error"):
+            events.append(ws.receive_json())
+    return events
+
+
+def test_a_database_is_a_service_that_can_fail_and_be_the_root_cause(api, graph):
+    api.post("/api/workspace", json=codebase.scan(SHOP))
+    # Drawn once, as a database, with its callers depending on it.
+    snap = api.get("/api/graph").json()
+    dbs = [n for n in snap["nodes"] if n["name"] == "orders-db"]
+    assert [(n["type"], n["id"]) for n in dbs] == [("Database", "svc:orders-db")]
+    assert any(l["type"] == "DEPENDS_ON" and l["source"] == "svc:inventory" and l["target"] == "svc:orders-db"
+               for l in snap["links"])
+    assert api.get("/api/services/orders-db/blast-radius").json()["result"]["count"] >= 3  # inventory, checkout, gateway...
+    # It can be broken, and the agent names it: not "no shared dependency".
+    assert api.post("/api/chaos/orders-db?mode=down").status_code == 200
+    events = _investigate(api)
+    assert events[-1]["root_cause"] == "orders-db" and events[-1]["root_causes"] == ["orders-db"]
+    # An alert aimed at a database lands on it, with the service that uses it also alerting.
+    api.post("/api/reset?keep_memory=true")
+    api.post("/api/alerts/alertmanager", json={"alerts": [
+        {"status": "firing", "labels": {"alertname": "DiskFull", "service": "orders-db", "severity": "critical"}},
+        {"status": "firing", "labels": {"alertname": "Slow", "service": "inventory", "severity": "critical"}}]})
+    assert _investigate(api)[-1]["root_cause"] == "orders-db"
+
+
+def test_separate_failures_are_reported_as_separate(api, graph):
+    api.post("/api/workspace", json=codebase.scan(SHOP))
+    assert api.post("/api/chaos/payments?mode=down").status_code == 200
+    assert api.post("/api/chaos/catalog?mode=down&additive=true").status_code == 200
+    events = _investigate(api)
+    final = events[-1]
+    assert set(final["root_causes"]) == {"payments", "catalog"} and final["root_cause"] in ("payments", "catalog")
+    proposed = {(a["kind"], a["target"]) for a in final["actions"]}
+    assert {("page_oncall", "payments"), ("page_oncall", "catalog")} <= proposed  # a page and a fix for each
+    assert "separate failures" in final["report"] and "`payments`" in final["report"] and "`catalog`" in final["report"]
+    # Two alerting services that share nothing are two incidents, not "escalate to a human".
+    api.post("/api/reset?keep_memory=true")
+    api.post("/api/chaos/cart?mode=down")
+    api.post("/api/chaos/payments?mode=down&additive=true")
+    assert set(_investigate(api)[-1]["root_causes"]) == {"cart", "payments"}
+
+
+def test_one_failure_is_still_reported_as_one(api, graph):
+    api.post("/api/workspace", json=codebase.scan(SHOP))
+    api.post("/api/chaos/inventory?mode=down")
+    final = _investigate(api)[-1]
+    assert final["root_cause"] == "inventory" and final["root_causes"] == ["inventory"]
+    assert "separate failures" not in final["report"]
+
+
+def test_the_answer_says_how_sure_it_is_and_why(api, graph):
+    api.post("/api/workspace", json=codebase.scan(SHOP))
+    api.post("/api/chaos/inventory?mode=down&deploy=true")        # a deployment just before the alerts
+    final = _investigate(api)[-1]
+    assert final["confidence"] == "high"
+    assert "deployment" in final["confidence_reason"] and "nothing unhealthy beneath" in final["confidence_reason"]
+
+    api.post("/api/reset?keep_memory=true")
+    api.post("/api/chaos/catalog?mode=down")                      # one alerting service, no change: it is a symptom of nothing else
+    final = _investigate(api)[-1]
+    assert final["confidence"] == "medium" and "deployment" not in final["confidence_reason"]
+
+    api.post("/api/reset?keep_memory=true")
+    api.post("/api/chaos/payments?mode=down&deploy=true")
+    api.post("/api/chaos/catalog?mode=down&additive=true")        # two failures: never "high"
+    final = _investigate(api)[-1]
+    assert final["confidence"] == "medium" and "separate failures" in final["confidence_reason"]
+
+
+def test_find_root_causes_groups_alerting_services_by_failure(api, graph):
+    from sentinel.tools import rootcause
+
+    api.post("/api/workspace", json=codebase.scan(SHOP))
+    api.post("/api/chaos/payments?mode=down")
+    api.post("/api/chaos/cart?mode=down&additive=true")
+    r = rootcause.find_root_causes(["checkout", "gateway", "web"], graph)["result"]
+    assert r["independent"] is True
+    assert {x["name"] for x in r["roots"]} == {"payments", "cart"}
+    by = {x["name"]: x for x in r["roots"]}
+    assert {"checkout"} <= set(by["payments"]["explains"]) and "gateway" in by["cart"]["explains"]
+    api.post("/api/reset?keep_memory=true")
+    api.post("/api/chaos/payments?mode=down")
+    one = rootcause.find_root_causes(["checkout", "gateway"], graph)["result"]
+    assert one["independent"] is False and [x["name"] for x in one["roots"]] == ["payments"]
 
 
 def test_passive_traffic_never_changes_health(api, graph):

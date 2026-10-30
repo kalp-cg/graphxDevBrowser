@@ -6,7 +6,8 @@ OTLP spans (a CLIENT span in the web app, a SERVER span in the service) and go t
 OpenTelemetry traces, so topology, health and alerts follow the same rules (otel.py).
 
 A 5xx (or a request that never got a response) is a failure of the service; a 4xx is the caller's mistake and
-is not counted. Passive capture is written as topology only (the API passes health=False): one developer
+is not counted. A page that calls its own backend adds no dependency, but its failures still count as evidence about
+that service. Passive capture is written as topology only (the API passes health=False): one developer
 clicking around a staging page must never flip a service's health or page anyone. Failures become health
 signals only when a developer attaches them to an investigation ("Investigate this failure"). Documents, scripts, styles, images and fonts are page assets, not service calls.
 
@@ -44,8 +45,6 @@ def to_otlp(records: list[dict[str, Any]], aliases: dict[str, str] | None = None
             continue
         page = resolve(r["pageUrl"], aliases) or f"web:{_host(r['pageUrl'])}"
         service = resolve(r["url"], aliases) or _host(r["url"])
-        if page == service:
-            continue  # a page calling its own backend is one component
         status = int(r.get("statusCode") or 0)
         failed = status == 0 or status >= 500
         start = int(r["startTime"]) * 1_000_000
@@ -55,6 +54,13 @@ def to_otlp(records: list[dict[str, Any]], aliases: dict[str, str] | None = None
                   "status": {"code": 2 if failed else 0}}
         attrs = _attrs({"http.request.method": r.get("method", "GET"), "url.full": r["url"],
                         "http.response.status_code": status})
+        if page == service:
+            # A page calling its own backend (one origin: Next.js, Django, Rails) is one component: no dependency edge,
+            # but the request is still evidence about that service's health.
+            spans.setdefault(service, []).append({**common, "spanId": server, "parentSpanId": "", "kind": 2,
+                                                  "name": f"{r.get('method', 'GET')} {urlsplit(r['url']).path}",
+                                                  "attributes": attrs})
+            continue
         spans.setdefault(page, []).append({**common, "spanId": client, "parentSpanId": "", "kind": 3,
                                            "name": f"{r.get('method', 'GET')} {service}", "attributes": attrs})
         spans.setdefault(service, []).append({**common, "spanId": server, "parentSpanId": client, "kind": 2,

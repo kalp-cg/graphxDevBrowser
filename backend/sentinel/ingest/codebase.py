@@ -43,7 +43,7 @@ LANGUAGES = (("package.json", "javascript"), ("tsconfig.json", "typescript"), ("
 DOCKER_BASES = (("golang", "go"), ("node", "javascript"), ("python", "python"), ("openjdk", "java"),
                 ("eclipse-temurin", "java"), ("gradle", "java"), ("maven", "java"), ("rust", "rust"),
                 ("ruby", "ruby"), ("php", "php"), ("dotnet", "csharp"), ("elixir", "elixir"), ("gcc", "cpp"))
-SERVICE_DIRS = (".", "src", "services", "apps", "packages", "cmd", "microservices")
+SERVICE_DIRS = (".", "src", "services", "svc", "apps", "packages", "modules", "cmd", "microservices")
 # Where a monorepo keeps a service's code when the compose file builds everything from the repo root.
 CODE_ROOTS = ("src", "services", "apps", "packages", "cmd", "microservices", "")
 # Services that observe or drive the system rather than being part of it. They are not services of the
@@ -110,10 +110,11 @@ def _has(path: Path, marker: str) -> bool:
     return bool(next(path.glob(marker), None)) if "*" in marker else (path / marker).exists()
 
 
-def _language(path: Path, dockerfile: Path | None = None) -> str:
-    """From manifests in the directory, then one level down (`src/cart/src/Cart.csproj`), then the Dockerfile's base image."""
+def _language(path: Path, dockerfile: Path | None = None, deep: bool = True) -> str:
+    """From manifests in the directory, then one level down (`src/cart/src/Cart.csproj`), then the Dockerfile's base image.
+    `deep=False` looks only at the directory itself: a folder that merely contains services is not a service."""
     if path.is_dir():
-        dirs = [path] + sorted(d for d in path.iterdir() if d.is_dir() and not d.name.startswith((".", "node_modules")))[:30]
+        dirs = [path] + ([] if not deep else sorted(d for d in path.iterdir() if d.is_dir() and not d.name.startswith((".", "node_modules")))[:30])
         for d in dirs:
             for marker, lang in LANGUAGES:
                 if _has(d, marker):
@@ -455,6 +456,9 @@ def _expand_monolith(repo: Path, services: dict[str, dict], databases: dict[str,
     entry = "app" if "app" in new_services else (edge[0] if edge else next(iter(new_services)))
     new_aliases = {k: (entry if v == mono["name"] else v) for k, v in aliases.items()}
     new_aliases[entry] = entry
+    for address, target in aliases.items():  # `/api/orders/...` on the app's address is the module `api.orders`
+        if target == mono["name"]:
+            new_aliases.update({f"{address}/api/{m.split('.', 1)[1]}": m for m in new_services if m.startswith("api.")})
     changes = _git_module_changes(repo, since, found["module_of"], set(new_services))
     return {"services": new_services, "databases": new_dbs, "deps": new_deps, "aliases": new_aliases, "changes": changes}
 
@@ -529,7 +533,7 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
             for d in sorted(folder.iterdir()):
                 if parent == "." and d.name in CODE_ROOTS:
                     continue  # `src/` holds services, it is not one
-                if d.is_dir() and not d.name.startswith(".") and (lang := _language(d)):
+                if d.is_dir() and not d.name.startswith(".") and (lang := _language(d, deep=False)):
                     rel = d.relative_to(repo).as_posix()
                     services[d.name] = {"name": d.name, "path": rel, "language": lang, "tier": "medium",
                                         "revenue_per_min": 0, "team": _owner(rules, rel), "published": False,
@@ -552,6 +556,7 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
         s["layer"] = s["layer"] or ("edge" if published and s["name"] not in called else "business")
     return {
         "repo": repo.name,
+        "repo_path": str(repo),
         "services": sorted(services.values(), key=lambda s: s["name"]),
         "databases": [{"name": n, "engine": e} for n, e in sorted(databases.items())],
         "dependencies": sorted([a, b] for a, b in deps),
@@ -582,12 +587,27 @@ def apply(graph: Graph, manifest: dict[str, Any]) -> dict[str, Any]:
                                             for s in manifest["services"] if s.get("team")])
     upsert(batch, "Database", [{"uid": f"db:{d['name']}", "name": d["name"], "engine": d["engine"],
                                 "status": "healthy"} for d in manifest["databases"]])
+    # A database is also a service of kind `database`: that is what lets it be unhealthy, be alerted on, and be the
+    # root cause (every traversal runs over services). The map draws it as a database.
+    callers = {d["name"]: [a for a, b in manifest["dependencies"] if b == d["name"] and a in svc_names]
+               for d in manifest["databases"]}
+    tiers = {s["name"]: s["tier"] for s in manifest["services"]}
+    rank = {t: i for i, t in enumerate(TIERS)}
+    upsert(batch, "Service", [
+        {"uid": f"svc:{d['name']}", "name": d["name"], "kind": "database", "layer": "data", "language": d["engine"],
+         "tier": min((tiers[c] for c in callers[d["name"]]), key=lambda t: rank.get(t, 9), default="medium"),
+         "revenue_per_min": 0, **({} if f"svc:{d['name']}" in existing else {"status": "healthy", "root_fault": False})}
+        for d in manifest["databases"]])
     link(batch, "Service", "DEPENDS_ON", "Service", [
         (f"svc:{a}", f"svc:{b}", {"uid": f"e:{a}->{b}", "protocol": "http", "weight": 1})
         for a, b in manifest["dependencies"] if a in svc_names and b in svc_names
     ])
     link(batch, "Service", "WRITES_TO", "Database", [
         (f"svc:{a}", f"db:{b}", {"uid": f"e:{a}-writes_to->{b}"})
+        for a, b in manifest["dependencies"] if a in svc_names and b in db_names
+    ])
+    link(batch, "Service", "DEPENDS_ON", "Service", [
+        (f"svc:{a}", f"svc:{b}", {"uid": f"e:{a}->{b}", "protocol": "sql", "weight": 1})
         for a, b in manifest["dependencies"] if a in svc_names and b in db_names
     ])
     for c in manifest["changes"]:

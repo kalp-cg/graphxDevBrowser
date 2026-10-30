@@ -54,6 +54,14 @@ def host_of(url: str) -> str:
 
 
 def resolve(host_or_url: str, aliases: dict[str, str] | None = None) -> str | None:
-    """The service a host (or URL) belongs to, if the workspace knows it."""
+    """The service a host (or URL) belongs to, if the workspace knows it. An alias may carry a path prefix
+    (`localhost:3000/api/orders`): the longest prefix of the URL's path wins, so one address can be several modules."""
     aliases = load()["aliases"] if aliases is None else aliases
-    return aliases.get(host_of(host_or_url))
+    host = host_of(host_or_url)
+    if "://" in host_or_url:
+        parts = [p for p in urlsplit(host_or_url).path.split("/") if p]
+        for n in range(len(parts), 0, -1):
+            hit = aliases.get(f"{host}/{'/'.join(parts[:n])}")
+            if hit:
+                return hit
+    return aliases.get(host)

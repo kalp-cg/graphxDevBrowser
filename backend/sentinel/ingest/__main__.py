@@ -1,4 +1,4 @@
-"""CLI: python -m sentinel.ingest sandbox | otlp FILE | monolith PATH | codebase PATH   [--graph NAME]"""
+"""CLI: python -m sentinel.ingest sandbox | otlp FILE | monolith PATH | codebase PATH | impact PATH   [--graph NAME]"""
 import argparse
 import json
 from pathlib import Path
@@ -30,7 +30,24 @@ def main() -> None:
     cb.add_argument("--push", metavar="URL", help="send the scan to a running API "
                                                   "instead of writing the graph directly")
     cb.add_argument("--dry-run", action="store_true", help="print the manifest, write nothing")
+    im = sub.add_parser("impact", help="which services a change affects and what depends on them (for a pull request)")
+    im.add_argument("path", type=Path, help="the repository root")
+    im.add_argument("--base", help="compare the branch with this ref (e.g. origin/main); default: uncommitted changes")
+    im.add_argument("--format", choices=["markdown", "json"], default="markdown")
+    im.add_argument("--fail-on", choices=["medium", "high"], help="exit 1 when the risk is at least this")
     args = parser.parse_args()
+
+    if args.cmd == "impact":
+        from ..impact import changed_files, impact_from_manifest, to_markdown
+        from .codebase import scan
+
+        manifest = scan(args.path)
+        result = impact_from_manifest(manifest, changed_files(args.path, args.base))
+        print(json.dumps(result, indent=2) if args.format == "json" else to_markdown(result))
+        order = ["none", "low", "medium", "high"]
+        if args.fail_on and order.index(result["risk"]) >= order.index(args.fail_on):
+            raise SystemExit(1)
+        return
 
     if args.cmd == "codebase":
         from .codebase import apply, scan

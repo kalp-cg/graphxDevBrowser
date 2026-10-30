@@ -1,0 +1,8 @@
+{
+  "_note": "Written by hand from sandbox/shop/docker-compose.yml and the services' code. The first draft missed three real connections (catalog -> cache, checkout -> cart, payments -> orders-db) that the scanner found; the truth was corrected, not the scanner.",
+  "services": ["web", "gateway", "catalog", "cart", "checkout", "payments", "inventory"],
+  "databases": ["orders-db", "cache"],
+  "edges": [["web", "gateway"], ["gateway", "catalog"], ["gateway", "cart"], ["gateway", "checkout"],
+            ["checkout", "cart"], ["checkout", "payments"], ["checkout", "inventory"],
+            ["catalog", "cache"], ["cart", "cache"], ["inventory", "orders-db"], ["payments", "orders-db"]]
+}
