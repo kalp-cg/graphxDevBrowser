@@ -1,6 +1,14 @@
-# WARNING: the SentinelGraph API has no authentication. This blueprint publishes it on the internet, which is
-# acceptable only for the public read-only-style demo of seeded sample data. Do not point it at a graph with real data.
-# Render Blueprint: New > Blueprint > pick this repo. Secrets (sync: false) are asked for at creation.
+# SentinelGraph demo API on Render (free plan). It needs NO secrets: it uses the embedded graph, seeds the sample company, and the
+# deterministic agent finds the root cause without a language model. DevBrowser installers connect to it on first launch.
+#
+# WARNING: the SentinelGraph API has no authentication. This blueprint publishes it on the internet, which is acceptable only for the
+# public demo of seeded sample data. Do not point it at a graph with real data.
+#
+# Render Blueprint: New > Blueprint > pick this repo > Apply. The free plan sleeps after 15 minutes without traffic and takes about a
+# minute to wake; DevBrowser retries while it does. Its graph is rebuilt from the seed on every start (no disk on the free plan).
+#
+# To use TigerGraph Cloud and/or Gemini instead: add TG_HOST, TG_SECRET (and GRAPH_BACKEND=tigergraph) and/or GEMINI_API_KEY with
+# LLM_PROVIDER=gemini as secret env vars in the Render dashboard.
 services:
   - type: web
     name: sentinelgraph-api
@@ -8,24 +16,16 @@ services:
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     plan: free
-    region: singapore          # pick the Render region closest to the TigerGraph Cloud instance
+    region: singapore
     healthCheckPath: /api/health
     envVars:
       - key: SEED_DEMO
         value: "1"
-      - key: TG_HOST
-        sync: false           # https://<id>.i.tgcloud.io
-      - key: TG_SECRET
-        sync: false
-      - key: TG_GRAPH
-        value: Sentinel
+      - key: GRAPH_BACKEND
+        value: local
       - key: LLM_PROVIDER
-        value: gemini           # a real model; autopilot takes over if it fails
-      - key: LLM_MODEL
-        value: gemini-3.1-flash-lite
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: CORS_ORIGINS
-        sync: false           # the Vercel URL, e.g. https://graph-hacks-alpha.vercel.app
+        value: autopilot
       - key: AUTOPILOT_DELAY_S
         value: "0.9"
+      - key: CORS_ORIGINS
+        value: "*"

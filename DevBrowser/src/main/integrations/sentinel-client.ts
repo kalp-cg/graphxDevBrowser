@@ -50,6 +50,12 @@ export class SentinelGraphClient {
     this.start();
   }
 
+  /** Use an address for this session without saving it (the hosted backend an installer ships with). A saved choice of the user's wins on the next launch. */
+  public attach(baseUrl: string): void {
+    this.baseUrl = baseUrl.trim().replace(/\/+$/, '');
+    this.start();
+  }
+
   /** Reconnect with the connection saved on the last launch. Returns false if there is none. */
   public restore(): boolean {
     const saved = this.store?.load();

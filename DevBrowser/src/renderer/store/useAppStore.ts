@@ -141,7 +141,7 @@ interface AppState {
   clearImpact: () => void;
   /** Demo: back to a healthy system. */
   restoreHealthy: () => Promise<void>;
-  restoreSentinel: () => Promise<void>;
+  restoreSentinel: (attempt?: number) => Promise<void>;
   refreshSentinelGraph: () => Promise<void>;
   startSentinelInvestigation: (question?: string, tx?: NetworkTransaction) => Promise<void>;
   sentinelRun: RunSummary;
@@ -444,7 +444,7 @@ export const useAppStore = create<AppState>((set, get) => {
         get().addToast({ type: 'warning', title: 'Could not restore', message: err instanceof Error ? err.message : String(err) });
       }
     },
-    restoreSentinel: async () => {
+    restoreSentinel: async (attempt = 0) => {
       if (!window.devBrowserAPI) return;
       const saved = await window.devBrowserAPI.sentinel.restore();
       if (!saved) return; // never configured: stay on the labelled sample graph
@@ -453,6 +453,9 @@ export const useAppStore = create<AppState>((set, get) => {
       if (saved.status.ok) {
         await get().refreshSentinelGraph();
         await get().pollSentinelRun(); // pick up an investigation already in progress
+      } else if (attempt < 5) {
+        // A hosted server that was asleep needs a minute to wake; the first request is what wakes it. Try again meanwhile.
+        setTimeout(() => { if (get().sentinelStatus !== 'connected') void get().restoreSentinel(attempt + 1); }, 20_000);
       }
     },
     refreshSentinelGraph: async () => {

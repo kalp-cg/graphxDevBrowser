@@ -31,8 +31,10 @@ dump.rdb
 # DevBrowser build outputs & caches
 DevBrowser/dist/
 DevBrowser/dist-electron/
-DevBrowser/build/
-# DevBrowser/release/
+DevBrowser/build/*
+!DevBrowser/build/icon.png
+!DevBrowser/build/icon.svg
+!DevBrowser/build/icon-*.png
 DevBrowser/coverage/
 DevBrowser/*.lcov
 DevBrowser/.nyc_output/

@@ -7,13 +7,19 @@ node_modules/
 dist/
 dist-electron/
 out/
-build/
+build/*
+!build/icon.png
+!build/icon.svg
+!build/icon-*.png
 release/
 
 # Testing & Coverage
 coverage/
 *.lcov
 .nyc_output/
+
+# Written by the release workflow from the DEVBROWSER_SENTINEL_URL repository variable
+default-backend.json
 
 # Logs & Environment
 npm-debug.log*

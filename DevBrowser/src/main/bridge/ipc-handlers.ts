@@ -16,6 +16,9 @@ import { sendApiRequest } from '../network/api-client';
 import { inspectFolder, killPid, portOwner, Runner } from '../run/runner';
 import { COMMON_DEV_PORTS } from '../../shared/domain/run';
 import net_ from 'node:net';
+import fs from 'node:fs';
+import path from 'node:path';
+import { parseDefaultBackend } from '../../shared/domain/default-backend';
 
 /** The command being run for the developer, if any. Stopped when the app quits. */
 export let runner: Runner | null = null;
@@ -136,7 +139,13 @@ export function registerIpcHandlers(
 
   // Reconnect with the saved connection: the URL comes back, the token never leaves the main process.
   ipcMain.handle(IPC_CHANNELS.SENTINEL_RESTORE, async () => {
-    if (!sentinelClient.restore()) return null;
+    if (!sentinelClient.restore()) {
+      // Never connected on this machine: an installer may ship with a hosted demo backend. It is used for the session, not saved.
+      let shipped: string | null = null;
+      try { shipped = parseDefaultBackend(fs.readFileSync(path.join(app.getAppPath(), 'default-backend.json'), 'utf8')); } catch { /* none shipped */ }
+      if (!shipped) return null;
+      sentinelClient.attach(shipped);
+    }
     return { url: sentinelClient.url, status: await sentinelClient.status() };
   });
 

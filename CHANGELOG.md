@@ -2,7 +2,15 @@
 
 All notable changes. Versions follow [semantic versioning](https://semver.org/).
 
-## Unreleased
+## 1.2.0 (2026-10-31)
+
+### Ships with a hosted demo
+- A fresh install connects by itself to the hosted SentinelGraph demo (the sample company, the deterministic agent) when the build carries
+  its address; your own choice in Settings always wins and is what is remembered. A server that is asleep is retried for a few minutes.
+- The release workflow builds the installers for macOS, Windows and Linux on GitHub and attaches them to the release; the app icons are now
+  tracked in git (a clean checkout could not build the installers without them).
+- `render.yaml` deploys the demo API with no secrets: embedded graph, seeded sample company, no language model needed.
+
 
 ### Mocks: answer requests yourself, from the Network panel
 - **Right-click any request** in the Network list: *Mock this response…* (opens an editor filled with the captured response), *Return 500*,

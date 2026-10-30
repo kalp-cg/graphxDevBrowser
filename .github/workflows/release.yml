@@ -28,6 +28,11 @@ jobs:
           cache-dependency-path: DevBrowser/package-lock.json
       - run: npm ci
       - run: npm run typecheck && npm run lint && npm test
+      # The hosted demo backend this build connects to on first launch (repository variable DEVBROWSER_SENTINEL_URL, no secret).
+      - name: Ship the default backend address
+        if: ${{ vars.DEVBROWSER_SENTINEL_URL != '' }}
+        shell: bash
+        run: echo '{"url":"${{ vars.DEVBROWSER_SENTINEL_URL }}"}' > default-backend.json
       - run: npm run dist
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'   # unsigned until a signing certificate is configured (see docs/RELEASING.md)

@@ -45,8 +45,16 @@ Download the installer for your system from the [latest release](../../releases/
 | Windows | `DevBrowser-Setup-<version>-x64.exe` (or `-Portable-` for no install) |
 | Linux | `DevBrowser-<version>-linux-<arch>.AppImage` or `.deb` |
 
-The first release is not code-signed yet, so macOS and Windows will warn you once. The steps are in
-[Getting started](docs/GETTING_STARTED.md#first-launch).
+A release build connects by itself to a hosted SentinelGraph demo (a sample company with real failures to investigate), so the system map
+works the first time you open it. To map **your own** code, run SentinelGraph on your machine ([below](#five-minutes-to-your-first-map)).
+
+The installers are not code-signed, so macOS and Windows warn you once:
+
+- **macOS:** open the `.dmg`, drag DevBrowser to Applications, then **right-click the app > Open > Open**. If macOS says the app is
+  "damaged", run `xattr -dr com.apple.quarantine /Applications/DevBrowser.app` once and open it again.
+- **Windows:** **More info > Run anyway** on the blue SmartScreen screen.
+
+More in [Getting started](docs/GETTING_STARTED.md#first-launch).
 
 ## Five minutes to your first map
 

@@ -1,6 +1,6 @@
 {
   "name": "devbrowser",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "The browser for people who build and run software: inspect any page, see how your services connect, and find the cause of a failure.",
   "main": "dist-electron/main.js",
   "type": "module",
@@ -71,13 +71,14 @@
       "dist/**",
       "dist-electron/**",
       "build/icon.png",
+      "default-backend.json",
       "package.json"
     ],
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.png",
-      "identity": null,
+      "identity": "-",
       "hardenedRuntime": false,
       "target": [
         {
