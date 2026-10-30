@@ -183,7 +183,7 @@ def team_handles(graph: Graph, service: str) -> list[str]:
 
 
 def inject_chaos(service: str, mode: str = "down", with_deploy: bool = False, graph: Graph | None = None,
-                 now: int | None = None) -> dict:
+                 now: int | None = None, additive: bool = False) -> dict:
     """Break any service. Its most important direct callers start alerting. Nothing here is scripted:
     the agent has to work it out from the graph like any other incident."""
     graph = graph or get_graph()
@@ -191,7 +191,8 @@ def inject_chaos(service: str, mode: str = "down", with_deploy: bool = False, gr
     if not attrs(graph, "Service", f"svc:{service}"):
         raise ValueError(f"unknown service {service!r}")
     mode = mode if mode in ("down", "degraded") else "down"
-    soft_reset(graph)
+    if not additive:  # additive: break this one as well as whatever is already broken
+        soft_reset(graph)
 
     batch = Batch()
     deploy = None
@@ -249,7 +250,7 @@ def sandbox_reset(graph: Graph | None = None) -> None:
 
 
 def sandbox_chaos(service: str, mode: str = "down", with_deploy: bool = False, graph: Graph | None = None,
-                  wait_s: float = 25) -> dict | None:
+                  wait_s: float = 25, additive: bool = False) -> dict | None:
     """Break a service of the running sandbox shop, then wait until its traces have turned into alerts, so an
     investigation started right after sees the incident. None when the shop does not know the service (the
     caller falls back to a graph-only failure). Injecting only into the graph would be undone within seconds
@@ -268,8 +269,9 @@ def sandbox_chaos(service: str, mode: str = "down", with_deploy: bool = False, g
                   "author": "Priya Shah"}
         cmd["deploy"] = deploy
     try:
-        _shop({"action": "reset"})
-        soft_reset(graph)
+        if not additive:
+            _shop({"action": "reset"})
+            soft_reset(graph)
         _shop(cmd)
     except (urllib.error.URLError, OSError, ValueError):
         return None

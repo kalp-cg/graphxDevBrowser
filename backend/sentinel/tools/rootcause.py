@@ -40,6 +40,15 @@ def find_common_cause(services: list[str], graph: Graph | None = None) -> dict:
         })
     candidates.sort(key=lambda c: c.pop("_key"))
     candidates = candidates[:5]
+    # Other deepest failures anywhere (unhealthy, nothing unhealthy beneath) that the top candidate does not account
+    # for: with them, "everything depends on X" is not the whole story.
+    other_failures: list[str] = []
+    if candidates and candidates[0]["likely_root_cause"]:
+        top_below = {s for s, h in below.get(candidates[0]["name"], {}).get("dist", {}).items() if h >= 0}
+        other_failures = sorted(
+            n for n in unhealthy_names(g)
+            if n != candidates[0]["name"] and n not in top_below
+            and not any(h > 0 for h in below.get(n, {}).get("dist", {}).values()))
     node_uids = [f"svc:{n}" for n in names]
     edge_uids: list[str] = []
     if candidates:
@@ -50,7 +59,44 @@ def find_common_cause(services: list[str], graph: Graph | None = None) -> dict:
             edge_uids += path
             node_uids += [f"svc:{e.split('->')[1]}" for e in path]
         node_uids.append(top["uid"])
-    return result({"services": names, "candidates": candidates}, reach_gsql("down"), node_uids, edge_uids)
+    node_uids += [f"svc:{n}" for n in other_failures]
+    return result({"services": names, "candidates": candidates, "other_failures": other_failures},
+                  reach_gsql("down"), node_uids, edge_uids)
+
+
+def find_root_causes(services: list[str], graph: Graph | None = None) -> dict:
+    """The independent failures behind these alerting services, for when they share no dependency.
+
+    For each alerting service: the unhealthy services at or below it that have nothing unhealthy beneath them (a
+    deepest failure). Alerting services that reach the same deepest failure are explained by it; services that
+    reach different ones are separate incidents. `independent` is true when there is more than one failure.
+    Each root lists the alerting services it explains, most first.
+    """
+    g = graph_or_default(graph)
+    names = sorted(set(services or []))
+    if not names:
+        return {"error": "bad_request", "message": "pass at least one service name"}
+    if err := check_services(g, names):
+        return err
+    below = reach(g, unhealthy_names(g), "up", MAX_HOPS)
+    roots: dict[str, dict] = {}
+    node_uids = [f"svc:{n}" for n in names]
+    edge_uids: list[str] = []
+    for n in names:
+        down = reach(g, [n], "down", MAX_HOPS)
+        for name, d in down.items():
+            if d["status"] == "healthy" or sum(1 for _s, h in below.get(name, {}).get("dist", {}).items() if h > 0):
+                continue  # healthy, or itself explained by something unhealthy beneath it
+            r = roots.setdefault(name, {"name": name, "uid": d["uid"], "status": d["status"], "tier": d["tier"],
+                                        "explains": [], "likely_root_cause": True})
+            r["explains"].append(n)
+            path = path_edges(down, n, name, "down")
+            edge_uids += path
+            node_uids += [f"svc:{e.split('->')[1]}" for e in path]
+    ranked = sorted(roots.values(), key=lambda r: (-len(r["explains"]), r["status"] != "down", r["name"]))
+    independent = len(ranked) > 1
+    return result({"services": names, "roots": ranked, "independent": independent}, reach_gsql("down"),
+                  node_uids + [r["uid"] for r in ranked], edge_uids)
 
 
 RECENT_CHANGES_GSQL = """

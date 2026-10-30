@@ -7,6 +7,9 @@ Follow this protocol, one tool call at a time:
 1. get_active_alerts: which services are alerting.
 2. find_common_cause with ALL alerting service names. The first candidate with likely_root_cause=true is the
    prime suspect. Alerting services that sit on top of it are symptoms, not causes.
+   If find_common_cause returns no candidate with likely_root_cause=true (the alerting services share no
+   dependency), call find_root_causes with the same services: there may be several independent failures. Treat
+   every root it returns as a suspect: recent_changes for all of them, and propose actions for each.
 3. recall_similar with the alerting services. If the top incident has the same root_cause_service as your
    suspect, this is a REPEAT: say so, then do step 4 and go straight to step 6 using the fixes that worked.
 4. recent_changes for the suspect (minutes=60). A deployment there minutes before the alerts is the likely

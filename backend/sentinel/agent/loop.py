@@ -58,7 +58,11 @@ def summarize(name: str, res: dict) -> str:
             return f"{len(r)} alerts firing on " + ", ".join(sorted({a['service'] for a in r}))
         if name == "find_common_cause":
             c = r["candidates"]
-            return (f"shared dependency: {c[0]['name']} ({c[0]['status']})" if c else "no shared dependency")
+            more = r.get("other_failures") or []
+            if c and c[0].get("likely_root_cause") is False:
+                return f"shared by all of them: {c[0]['name']} ({c[0]['status']}), not a cause"
+            return ((f"shared dependency: {c[0]['name']} ({c[0]['status']})" + (f"; also failing: {', '.join(more)}" if more else ""))
+                    if c else "no shared dependency")
         if name == "recent_changes":
             ch = r["changes"]
             return (f"{ch[0]['version']} on {ch[0]['service']} by {ch[0]['author']}, {ch[0]['minutes_ago']} min ago: "
@@ -81,6 +85,14 @@ def summarize(name: str, res: dict) -> str:
             f = r.get("focus")
             top = ", ".join(x["name"] for x in r["top"][:3])
             return (f"{f['name']} ranks #{f['rank']} of {f['out_of']}; top: {top}" if f else f"top: {top}")
+        if name == "find_root_causes":
+            roots = r["roots"]
+            if not roots:
+                return "no unhealthy service beneath the alerting ones"
+            if r["independent"]:
+                return f"{len(roots)} separate failures: " + ", ".join(
+                    f"{x['name']} ({len(x['explains'])} alerting)" for x in roots)
+            return f"one failure: {roots[0]['name']} ({roots[0]['status']})"
         if name == "failure_path":
             return " → ".join(h["name"] for h in r["path"]) if r.get("path") else r.get("message", "no path")
         if name == "propose_action":
@@ -99,6 +111,10 @@ class RunState:
     def __init__(self) -> None:
         self.services: list[str] = []
         self.suspect: str | None = None
+        self.suspects: list[str] = []
+        self.top: dict = {}          # the leading candidate of find_common_cause
+        self.alerting = 0
+        self.change: dict | None = None  # the newest recent deployment on the suspect
         self.repeat: dict | None = None
         self.proposed: list[dict] = []
         self.concluded = False
@@ -115,7 +131,17 @@ class RunState:
         elif name == "find_common_cause" and isinstance(r, dict) and r.get("candidates"):
             c = [x for x in r["candidates"] if isinstance(x, dict)]
             if c:
+                self.top, self.alerting = c[0], len(r.get("services") or [])
                 self.suspect = c[0]["name"]
+                extra = [n for n in (r.get("other_failures") or []) if isinstance(n, str)]
+                if extra:
+                    self.suspects = [self.suspect, *extra]
+        elif name == "recent_changes" and isinstance(r, dict) and r.get("changes"):
+            self.change = next((c for c in r["changes"] if isinstance(c, dict)), None)
+        elif name == "find_root_causes" and isinstance(r, dict) and r.get("roots"):
+            self.suspects = [x["name"] for x in r["roots"] if isinstance(x, dict)]
+            if self.suspects and not self.suspect:
+                self.suspect = self.suspects[0]
         elif name == "recall_similar" and isinstance(r, dict) and r.get("incidents"):
             # The best match with the same root cause as the graph's suspect (not just the top score).
             for inc in r["incidents"]:
@@ -127,6 +153,30 @@ class RunState:
             self.proposed.append(r["action"])
         elif name == "conclude_investigation":
             self.concluded = True
+
+
+def confidence(state: RunState) -> tuple[str, str] | None:
+    """How sure the answer is, and why: a count of independent pieces of evidence, not a probability."""
+    if not state.suspect:
+        return None
+    reasons, score = [], 0
+    if state.top.get("likely_root_cause") or state.suspects:
+        score += 2
+        reasons.append("it is unhealthy with nothing unhealthy beneath it")
+    if state.alerting >= 2:
+        score += 1
+        reasons.append(f"{state.alerting} alerting services depend on it")
+    if state.change:
+        score += 2
+        reasons.append(f"a deployment ({state.change.get('version', '?')}) landed {state.change.get('minutes_ago', '?')} min before the alerts")
+    if state.repeat:
+        score += 1
+        reasons.append(f"it matches {state.repeat['id']}")
+    level = "high" if score >= 4 else "medium" if score >= 2 else "low"
+    if len(state.suspects) > 1:
+        level = "medium" if level == "high" else level
+        reasons.append(f"{len(state.suspects)} separate failures, each unhealthy in its own right")
+    return level, "; ".join(reasons) or "no supporting evidence beyond the alert"
 
 
 async def investigate(question: str, emit: Emit, toolbox: GraphToolbox, llm: LLM | None = None,
@@ -217,8 +267,11 @@ async def investigate(question: str, emit: Emit, toolbox: GraphToolbox, llm: LLM
     if incident:
         await asyncio.to_thread(incidents.record_steps, run_id, state.tool_calls)
 
+    sure = confidence(state)
     final = {"type": "final", "report": report or "(no report)", "provider": llm.name, "steps": state.tool_calls,
-             "root_cause": state.suspect, "incident": incident, "repeat_of": state.repeat,
+             "root_cause": state.suspect, "root_causes": state.suspects or ([state.suspect] if state.suspect else []),
+             "confidence": sure[0] if sure else None, "confidence_reason": sure[1] if sure else None,
+             "incident": incident, "repeat_of": state.repeat,
              "actions": state.proposed, "seconds": round(time.monotonic() - started, 1)}
     await send(final)
     return final

@@ -79,9 +79,14 @@ def _pick(vertices: dict[str, dict], edges: list[dict], now: int) -> dict[str, t
     def add(uid: str, t: str, team: str | None) -> None:
         picked.setdefault(uid, (t, team))
 
+    # A database scanned from a repository is a Service of kind `database` (so it can fail and be a root cause);
+    # it is drawn as a database, and its plain Database twin (which carries read/write edges) is not drawn twice.
+    db_services = {v["name"] for v in vertices.values() if v["_type"] == "Service" and v.get("kind") == "database"}
     for t in ("Service", "Database"):
         for u in of_type(t):
-            add(u, t, owner.get(u))
+            if t == "Database" and vertices[u]["name"] in db_services:
+                continue
+            add(u, "Database" if vertices[u].get("kind") == "database" else t, owner.get(u))
     for u in of_type("Team"):
         add(u, "Team", vertices[u]["name"])
     # On-call people, plus authors of recent changes.

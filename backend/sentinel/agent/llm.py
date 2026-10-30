@@ -7,6 +7,7 @@ Each provider returns an `LLMReply` with plain text and normalized tool calls.
 import asyncio
 import json
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -86,6 +87,39 @@ async def _post_with_retry(client: httpx.AsyncClient, url: str, body: dict, head
     raise RuntimeError("unreachable")
 
 
+def extract_tool_calls(content: str, tools: list[dict]) -> list[ToolCall]:
+    """Tool calls a model wrote as text instead of in the structured field (many small local models do): a bare JSON object
+    `{"name": ..., "arguments": {...}}`, a list of them, a ```json fence, or `<tool_call>...</tool_call>`. Only calls to a tool
+    that was actually offered count; anything else stays what it was, an answer."""
+    names = {t["function"]["name"] for t in tools if isinstance(t, dict) and "function" in t}
+    text = (content or "").strip()
+    if not text or not names:
+        return []
+    candidates = [m for m in re.findall(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.S)]
+    candidates += [m for m in re.findall(r"```(?:json)?\s*(.*?)```", text, re.S)]
+    candidates.append(text)
+    for raw in candidates:
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        items = data if isinstance(data, list) else [data]
+        calls = []
+        for it in items:
+            if not isinstance(it, dict):
+                break
+            fn = it.get("function") if isinstance(it.get("function"), dict) else it
+            name = fn.get("name")
+            if name not in names:
+                break
+            args = fn.get("arguments", fn.get("parameters", {}))
+            calls.append(ToolCall(id=f"call_{uuid.uuid4().hex[:8]}", name=name, args=_parse_args(args)))
+        else:
+            if calls:
+                return calls
+    return []
+
+
 class OllamaLLM:
     """Local model through Ollama's native /api/chat (lets us turn qwen3's hidden thinking off)."""
 
@@ -119,7 +153,10 @@ class OllamaLLM:
         calls = [ToolCall(id=f"call_{uuid.uuid4().hex[:8]}", name=c["function"]["name"],
                           args=_parse_args(c["function"].get("arguments")))
                  for c in msg.get("tool_calls") or []]
-        return LLMReply(content=(msg.get("content") or "").strip(), tool_calls=calls)
+        content = (msg.get("content") or "").strip()
+        if not calls and (recovered := extract_tool_calls(content, tools)):
+            calls, content = recovered, ""
+        return LLMReply(content=content, tool_calls=calls)
 
 
 class OpenAICompatLLM:
@@ -174,11 +211,32 @@ class OpenAICompatLLM:
 GEMINI_OPENAI_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
 
+def installed_ollama_models() -> list[str]:
+    try:
+        r = httpx.get(f"{settings.ollama_url.rstrip('/')}/api/tags", timeout=2.0)
+        r.raise_for_status()
+        return [m["name"] for m in r.json().get("models", [])]
+    except Exception:  # noqa: BLE001 - not running / not reachable
+        return []
+
+
+def pick_ollama_model(wanted: str, installed: list[str]) -> str:
+    """The configured model if it is installed; otherwise the closest installed one (same family, then any), so that a
+    machine with a different model still gets the language model, not a silent fall back to the built-in agent."""
+    if not installed or wanted in installed or f"{wanted}:latest" in installed:
+        return wanted
+    family = wanted.split(":")[0]
+    return next((m for m in installed if m.split(":")[0] == family), installed[0])
+
+
 def make_llm(provider: str | None = None) -> LLM:
     """Build the provider named by LLM_PROVIDER: ollama (default) | gemini | openai | autopilot."""
     provider = (provider or settings.llm_provider).lower()
     if provider == "ollama":
-        return OllamaLLM(settings.ollama_model, settings.ollama_url)
+        model = pick_ollama_model(settings.ollama_model, installed_ollama_models())
+        if model != settings.ollama_model:
+            log.warning("Ollama model %s is not installed; using %s", settings.ollama_model, model)
+        return OllamaLLM(model, settings.ollama_url)
     if provider == "gemini":
         if not settings.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY is not set")

@@ -61,9 +61,21 @@ class Autopilot:
         if not isinstance(common_res, dict):
             common_res = {}
         candidates = [c for c in (common_res.get("candidates") or []) if isinstance(c, dict)]
-        if not candidates:
-            return LLMReply(content="No shared dependency found for the alerting services; escalating to a human.")
+        if not candidates or candidates[0].get("likely_root_cause") is False:
+            # Nothing they all share: several independent failures, or a healthy-looking shared dependency.
+            if len(services) < 2:
+                return LLMReply(content="No unhealthy dependency found for the alerting service; escalating to a human.")
+            if "find_root_causes" not in done:
+                return call("find_root_causes", services=services)
+            roots_res = last.get("find_root_causes") or {}
+            roots = [r["name"] for r in (roots_res.get("roots") or []) if isinstance(r, dict)] if isinstance(roots_res, dict) else []
+            if not roots:
+                return LLMReply(content="No shared dependency and no unhealthy service beneath the alerting ones; escalating to a human.")
+            return self._independent(h, call, services, roots, last, roots_res)
         top = candidates[0]["name"]
+        others = [n for n in (common_res.get("other_failures") or []) if isinstance(n, str)]
+        if others:  # something else is also broken and the top candidate does not explain it
+            return self._independent(h, call, services, [top, *others], last, {})
 
         if "recall_similar" not in done:
             return call("recall_similar", services=services)
@@ -112,6 +124,39 @@ class Autopilot:
             return call("conclude_investigation", root_cause_service=top, summary=summary,
                         similar_incident=repeat["id"] if repeat else "")
         return LLMReply(content=self._report(top, services, change, repeat, last, kinds))
+
+    def _independent(self, h: list, call: Any, services: list[str], roots: list[str], last: dict, roots_res: dict) -> LLMReply:
+        """Several separate failures: a fix per root, a page per root, one conclusion that names them all."""
+        if "recent_changes" not in {n for n, _a, _r in h}:
+            return call("recent_changes", services=roots, minutes=60)
+        recent = last.get("recent_changes") or {}
+        changes = {c.get("service"): c for c in (recent.get("changes") or []) if isinstance(c, dict)} if isinstance(recent, dict) else {}
+        proposed = {(args.get("kind"), args.get("target_service")) for name, args, _ in h
+                    if name == "propose_action" and isinstance(args, dict)}
+        for root in roots:
+            change = changes.get(root)
+            for kind in (["rollback"] if change else ["open_breaker", "scale_up"]) + ["page_oncall"]:
+                if (kind, root) not in proposed:
+                    why = (f"{change['version']} '{change['message']}' by {change['author']} deployed "
+                           f"{change['minutes_ago']} min before the alerts" if change
+                           else f"{root} is an unhealthy service of its own, separate from the other failures")
+                    return call("propose_action", kind=kind, target_service=root, reason=why,
+                                risk="low" if kind == "page_oncall" else "medium")
+        explained = {r["name"]: r.get("explains", []) for r in (roots_res.get("roots") or []) if isinstance(r, dict)}
+        behind = lambda r: f" (behind {', '.join(explained[r])})" if explained.get(r) else ""  # noqa: E731
+        summary = f"{len(roots)} separate failures: " + "; ".join(f"{r}{behind(r)}" for r in roots) + "."
+        if "conclude_investigation" not in {n for n, _a, _r in h}:
+            return call("conclude_investigation", root_cause_service=roots[0], summary=summary, similar_incident="")
+        lines = "\n".join(
+            f"- `{r}`" + (f": deployment **{changes[r]['version']}** \"{changes[r]['message']}\" by {changes[r]['author']}, "
+                          f"{changes[r]['minutes_ago']} min before the alerts" if r in changes else ": unhealthy, no recent deployment")
+            + (f" (behind {', '.join(f'`{s}`' for s in explained[r])})" if explained.get(r) else "") for r in roots)
+        return LLMReply(content=(
+            f"**Root causes**: {len(roots)} separate failures, not one.\n{lines}\n\n"
+            f"**Evidence**: the alerting services ({', '.join(f'`{s}`' for s in services)}); each of these services is "
+            f"unhealthy with nothing unhealthy beneath it, so one does not explain the others.\n\n"
+            f"**Proposed actions**: a fix and a page for each of {', '.join(f'`{r}`' for r in roots)}, awaiting human approval.\n\n"
+            f"**Memory**: stored as one incident naming the first failure; the others are in its summary."))
 
     @staticmethod
     def _report(top: str, services: list[str], change: dict | None, repeat: dict | None, last: dict,

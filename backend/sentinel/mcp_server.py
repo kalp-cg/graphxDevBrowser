@@ -51,6 +51,12 @@ def find_common_cause(services: list[str]) -> dict:
 
 
 @server.tool()
+def find_root_causes(services: list[str]) -> dict:
+    """When the alerting services share no dependency: the separate failures behind them (several can be at once)."""
+    return rootcause.find_root_causes(services)
+
+
+@server.tool()
 def recent_changes(services: list[str], minutes: int = 60) -> dict:
     """Deployments to these services in the last N minutes, with commit message, author and team."""
     return rootcause.recent_changes(services, minutes)
