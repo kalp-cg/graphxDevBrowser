@@ -187,14 +187,54 @@ DEVBROWSER_PACKAGED=/path/to/DevBrowser npx playwright test -c devbrowser.config
 
 | Suite | Result |
 | :--- | :--- |
-| App unit tests (`npm test`) | 62 passed, 2 skipped (they need a live server) |
-| Server tests (`pytest`, embedded graph) | 111 passed |
-| End-to-end, from source | 17 passed |
-| End-to-end, against the app installed from the `.dmg` | 17 passed |
+| App unit tests (`npm test`) | 89 passed, 2 skipped (they need a live server) |
+| Server tests (`pytest`, embedded graph), including the ground-truth benchmark | 140 passed |
+| End-to-end, from source | 25 passed |
+| End-to-end, against the app installed from the `.dmg` | 25 passed (re-run after the final build) |
 | Type check and lint (app, dashboard) | clean |
 
 The end-to-end suite starts the real app and drives it: it browses, opens every panel, connects a project, breaks a service,
 investigates it, restores it, and relaunches to check the session comes back.
+
+### Benchmark: is the map right?
+
+```bash
+python scripts/benchmark.py                                         # eight repository layouts with hand-written ground truth
+python scripts/benchmark.py --repo ~/code/shop --truth shop.json    # your repository, against a truth file you write
+```
+
+`shop.json` is what *you* say the repository contains: `{"services": [...], "databases": [...], "edges": [["web", "api"], ...]}`. It prints precision (what was
+reported is right) and recall (everything was found) for services, databases and connections, and lists what is missing or extra. The built-in cases are
+synthetic, so they pin down the layouts we know, not yours; the sample shop is scored against a truth file too. (Writing that truth by hand is fallible: the
+first draft missed three real connections the scanner found, and the truth was corrected.)
+
+### Pre-merge impact in CI
+
+Copy `docs/ci/sentinelgraph-impact.yml` into your project's `.github/workflows/`. Each pull request gets a comment listing the services it touches and what depends on
+them; add `--fail-on high` to fail the build on a risky change. Test it on a throwaway branch first: change a file in a service others depend on and check the comment
+names the right ones.
+
+## 9b. Sandbox exam
+
+On the service graph, press **Sandbox test**, **Load sandbox**, pick who investigates, **Run test**. 12 cases, scored against what was
+broken. Expect the built-in agent 12 of 12. For a language model, read the "built-in agent" notes per case: a model that cannot answer is
+not scored as if it had. Cases are synthetic and the same every run; a pass shows the agent handles these shapes, not your system.
+
+## 9c. Real data (RCAEval)
+
+`backend/benchmark/rcaeval.py` replays a public benchmark of real injected faults into the product and scores its root cause against
+the label. Needs `pip install pandas pyarrow`; downloads one case at a time (about 10 MB each).
+
+    cd backend && RCA_OUT=/tmp/rcaeval python -m benchmark.rcaeval RE2-OB      # 90 cases, about 12 minutes
+    cd backend && RCA_OUT=/tmp/rcaeval python -m benchmark.rcaeval RE2-TT      # Train Ticket, about 40 services
+
+It uses only the product's own ingest (`ingest/otel.py`, `ingest/metrics.py`) and `find_root_causes`, feeding the minutes before a fault
+and the first 5 minutes after it. It prints top-1 and top-3 for traces only, metrics only and both, next to a no-graph baseline and a
+random guess. Repetition 1 of each fault was the development set; the held-out line uses repetitions 2 and 3.
+
+What it does not show: one fault at a time; the fault is noticed five minutes in; no human-written alert rules; the agent loop and the
+LLM are not in the path (only the tool they call). A good number here says the detection and the graph reasoning work on real
+recorded telemetry, not that the product is right on your system.
 
 ## 10. Known limits
 
@@ -202,7 +242,10 @@ investigates it, restores it, and relaunches to check the session comes back.
 - Unsigned installers; an OS warning on first launch.
 - Windows and Linux builds are untested on real hardware at the time of this release.
 - Monolith mapping reads TypeScript, JavaScript and Python imports; other languages show as one box.
-- One common cause per investigation; two independent simultaneous faults are untested.
+- **Health needs a signal.** A connected project has no alerts until traces or alerts arrive ("Live data") or you investigate a failed request from your own browsing. The map itself needs none.
+- **Confidence is a count of evidence**, not a probability, and it has not been calibrated against real incidents.
+- **A database failure is diagnosed from what is alerting.** With nothing alerting on the services that use it, nothing says it is down.
+- **Connections read from a compose file's `depends_on` mean "starts after", which is not always "calls".** The map marks neither as observed yet.
 - Ownership needs a `CODEOWNERS` file; without it services show no owner.
 - The scan reads files the server can read, on the server's own machine. A server in Docker needs the projects folder mounted.
 

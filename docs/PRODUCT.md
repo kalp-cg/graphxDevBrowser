@@ -115,7 +115,7 @@ production incidents; see the limits below.
 | Installer size | 96 MB (Mac, Apple silicon), 100 MB (Mac, Intel), 84 MB (Windows installer), 76 MB (Windows portable) |
 | Start-up to a usable window | **0.6 to 0.8 s** after the first launch (median of five launches, two separate runs: 0.58 s and 0.80 s); the very first launch on a machine took 3.4 s |
 | Code loaded for the first screen | 280 KB (the map's 200 KB is loaded only when you open it) |
-| Automated checks that pass | **111** server tests, **62** app unit tests, **17** end-to-end tests that drive the real, installed app |
+| Automated checks that pass | **140** server tests (including a ground-truth benchmark of 8 repository layouts and the sample shop, scored 100% precision and recall), **89** app unit tests, **25** end-to-end tests that drive the real, installed app |
 | Platforms | macOS (tested), Windows and Linux (built, not yet run on real hardware) |
 
 ## 6. The market
@@ -228,8 +228,8 @@ Said plainly, because a buyer will ask.
 - **We have not measured time saved by real engineers.** This is the single most important missing number
   (assumption D above). The [pilot protocol](TESTING.md#8-pilot-with-real-engineers) measures it with 8 to 12 on-call
   engineers.
-- **Root-cause accuracy is shown on single, injected faults** on small and medium systems, not on production incidents.
-  We have not tested two simultaneous, independent failures.
+- **Root-cause accuracy is shown on injected faults** (a service, a database, two at once) on small and medium systems, not on production
+  incidents. Confidence is a count of evidence, not a calibrated probability.
 - **The map's accuracy is checked by hand on seven systems**, not at scale, and it depends on what a repository
   declares. A system whose structure is only in runtime traffic needs traces.
 - **No customer has used it in production yet.**
@@ -243,11 +243,14 @@ Said plainly, because a buyer will ask.
 In the order we would do it. No dates: we will date them after the pilot.
 
 1. **Pilot** with 8 to 12 on-call engineers; publish the measured time saved.
-2. **Sign-in and roles** on the server, so a team can share one safely.
-3. **Signed and notarized installers and automatic updates.**
-4. **More languages** for monolith mapping (Go, Java, C#) and more manifest formats (Helm, Terraform).
-5. **Easier live data:** a generated OpenTelemetry collector configuration, so real traffic joins the map in minutes.
-6. **Team features:** shared history of incidents (the product already learns from each one), Slack and paging.
+2. **Bundle the server inside the app**, so it starts by itself. Today a user runs it separately; this is the largest adoption friction.
+3. **Sign-in and roles** on the server, so a team can share one safely.
+4. **Signed and notarized installers and automatic updates.**
+5. **Observed versus declared connections:** mark each connection as read from code or seen in traffic, and weight a compose `depends_on` ("starts after") below a real call.
+6. **Live data with less setup:** read traces from an existing Jaeger or Tempo, and (opt-in) treat failures in your own browsing of an app as health signals.
+7. **More languages** for monolith mapping (Go, Java, C#) and more manifest formats (Helm, Terraform).
+8. **Browser gaps:** a download manager, pinned tabs, and developer-extension support (for example React DevTools).
+9. **Team features:** shared history of incidents (the product already learns from each one), Slack and paging.
 
 ## Sources
 

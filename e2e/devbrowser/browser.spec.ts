@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from "@playwright/test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -20,7 +20,8 @@ let page: Page;
 async function launch() {
   // Linux CI containers have no SUID sandbox helper for Electron.
   const args = process.platform === "linux" ? [APP, "--no-sandbox"] : [APP];
-  const env = { ...process.env, DEVBROWSER_USER_DATA: userData, NODE_ENV: "production" };
+  // The suite must not depend on whether a model happens to be running on this machine.
+  const env = { ...process.env, DEVBROWSER_USER_DATA: userData, NODE_ENV: "production", OLLAMA_HOST: "http://127.0.0.1:1" };
   // DEVBROWSER_PACKAGED=/path/to/DevBrowser(.app/Contents/MacOS/DevBrowser|.exe) runs the suite against an installed build.
   app = PACKAGED ? await electron.launch({ executablePath: PACKAGED, args: [], env })
     : await electron.launch({ executablePath: electronPath, args, cwd: APP, env });
@@ -40,6 +41,9 @@ const inPage = <T>(js: string) =>
     const view = pane?.querySelector("webview") as unknown as { executeJavaScript(c: string): Promise<unknown> };
     return view.executeJavaScript(code);
   }, js) as Promise<T>;
+
+/** The address as shown. While the field still has focus (it can, on a machine whose window is not frontmost) it shows the full URL. */
+const shownAs = (url: string) => new RegExp(`^(http://)?${url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
 
 const tabs = () => page.getByRole("tab");
 const address = () => page.getByRole("textbox", { name: "Address and search bar" });
@@ -79,14 +83,14 @@ test("the address bar loads a dev server; the tab takes the page's title", async
 
 test("back and forward follow the page's history", async () => {
   await go(`${SHOP}/?page=2`);
-  await expect(address()).toHaveValue(`${SHOP}/?page=2`);
+  await expect(address()).toHaveValue(shownAs(`${SHOP}/?page=2`));
   const back = page.getByRole("button", { name: "Back", exact: true });
   await expect(back).toBeEnabled();
   await back.click();
   await expect(address()).toHaveValue(SHOP);
   await expect(page.getByRole("button", { name: "Forward", exact: true })).toBeEnabled();
   await menu("forward");
-  await expect(address()).toHaveValue(`${SHOP}/?page=2`);
+  await expect(address()).toHaveValue(shownAs(`${SHOP}/?page=2`));
 });
 
 test("a page keeps its state across tab switches and tool panels (no reload)", async () => {
@@ -128,7 +132,7 @@ test("device mode emulates a phone: viewport, user agent, touch", async () => {
   expect(await inPage<boolean>("navigator.userAgent.includes('iPhone')")).toBe(true);
   expect(await inPage<number>("navigator.maxTouchPoints")).toBeGreaterThan(0);
   await shot("04-device-mode");
-  expect(await inPage<number>("document.querySelectorAll('.grid > .card').length")).toBe(3);
+  await expect.poll(() => inPage<number>("document.querySelectorAll('.grid > .card').length")).toBe(3);   // the reload for the new user agent
   expect(await inPage<string>("getComputedStyle(document.querySelector('.grid')).gridTemplateColumns.split(' ').length + ''"))
     .toBe("1"); // the page really lays out as a phone: one column
   await page.getByRole("button", { name: "Exit device mode" }).click();
@@ -140,7 +144,7 @@ test("window.open opens a tab, not a bare window", async () => {
   const before = await tabs().count();
   await inPage(`window.open('http://${SHOP}/?popup=1')`);
   await expect(tabs()).toHaveCount(before + 1);
-  await expect(address()).toHaveValue(`${SHOP}/?popup=1`);
+  await expect(address()).toHaveValue(shownAs(`${SHOP}/?popup=1`));
   expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
 });
 
@@ -171,6 +175,20 @@ test("close a tab and reopen it", async () => {
   await expect(tabs()).toHaveCount(before - 1);
   await menu("reopen-tab");
   await expect(tabs()).toHaveCount(before);
+});
+
+test("bookmark a page, find it on a new tab, remove it", async () => {
+  await go(SHOP);
+  await expect.poll(() => inPage<string>("document.querySelectorAll('.card').length")).toBe(3);
+  await page.getByRole("button", { name: "Bookmark this page" }).click();
+  await expect(page.getByRole("button", { name: "Remove bookmark", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "New tab", exact: true }).click();                  // a new tab lists it
+  const bookmarks = page.getByRole("region", { name: "Bookmarks" });
+  await expect(bookmarks.getByText("Sandbox Shop")).toBeVisible();
+  await bookmarks.getByRole("button", { name: /Sandbox Shop/ }).first().click();
+  await expect(address()).toHaveValue(SHOP, { timeout: 15_000 });
+  await page.getByRole("button", { name: "Remove bookmark", exact: true }).click();         // and it can be removed again
+  await expect(page.getByRole("button", { name: "Bookmark this page" })).toHaveAttribute("aria-pressed", "false");
 });
 
 test("Security and Network show only the open website; History keeps the earlier ones", async () => {
@@ -204,6 +222,106 @@ test("Security and Network show only the open website; History keeps the earlier
   await expect(network.getByText(/localhost:7400/).first()).toBeVisible();
   await page.getByRole("button", { name: "Close panel" }).click();
   await go(SHOP);
+});
+
+test("the API client really sends requests, with variables and checks, and explains a failure", async () => {
+  await page.getByRole("button", { name: "API Client", exact: true }).click();
+  const panel = page.getByRole("region", { name: "API Client panel" });
+  const address = panel.getByRole("textbox", { name: "Request address" });
+
+  // A real request to the sample shop's API: its real status, size and body, not a canned answer.
+  await address.fill("localhost:7401/api/products");
+  await panel.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(panel.getByText(/^200 OK$/)).toBeVisible({ timeout: 15_000 });
+  await expect(panel.getByLabel("Response body")).toContainText("Graph mug");
+  await expect(panel.getByText(/\d+ ms/).first()).toBeVisible();
+  await shot("14-api-client");
+
+  // Variables: {{baseUrl}} comes from the Variables tab.
+  await address.fill("{{baseUrl}}/api/products");
+  await panel.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText("Undefined variable").first()).toBeHidden().catch(() => undefined);
+  await panel.getByRole("tab", { name: /^variables/i }).click();
+  await panel.getByRole("textbox", { name: "Value 1" }).fill("http://localhost:7401");
+  await panel.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(panel.getByText(/^200 OK$/)).toBeVisible();
+
+  // Checks run on the response.
+  await panel.getByRole("tab", { name: /^checks/i }).click();
+  await panel.getByRole("button", { name: "Add check" }).click();
+  await panel.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(panel.getByLabel("Check results").getByText("Passed: status 2xx: got 200")).toBeVisible();
+  await panel.getByRole("textbox", { name: "Expected value" }).fill("404");
+  await panel.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(panel.getByLabel("Check results").getByText(/^Failed: status 404: got 200/)).toBeVisible();
+
+  // A server that is not there is explained, not shown as a made-up response.
+  await address.fill("localhost:59999/nothing");
+  await panel.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(panel.getByRole("alert")).toContainText("Connection refused");
+  await panel.getByRole("button", { name: "Load…" }).isVisible().catch(() => undefined);
+  await page.getByRole("button", { name: "Close panel" }).click();
+});
+
+test("the AI assistant says so when no model is running, instead of inventing an answer", async () => {
+  await page.getByRole("button", { name: "AI Assistant", exact: true }).click();
+  const panel = page.getByRole("region", { name: "AI Assistant panel" });
+  await panel.getByPlaceholder(/Ask local AI/).fill("Is my app secure?");
+  await panel.getByPlaceholder(/Ask local AI/).press("Enter");
+  await expect(panel.getByText(/Local AI Error/)).toBeVisible({ timeout: 20_000 });
+  await expect(panel.getByText(/ollama serve/)).toBeVisible();
+  await expect(panel.getByText(/verified safe/)).toHaveCount(0);
+  await page.getByRole("button", { name: "Close panel" }).click();
+});
+
+test("the API client imports a cURL command and sends it", async () => {
+  await page.getByRole("button", { name: "API Client", exact: true }).click();
+  const panel = page.getByRole("region", { name: "API Client panel" });
+  await panel.getByRole("button", { name: "Import cURL" }).click();
+  await panel.getByRole("textbox", { name: "curl command" }).fill(
+    "curl 'http://localhost:7401/api/products?limit=2' \\\n  -H 'accept: application/json' \\\n  --compressed");
+  await panel.getByRole("button", { name: "Import", exact: true }).click();
+  await expect(panel.getByRole("textbox", { name: "Request address" })).toHaveValue("http://localhost:7401/api/products?limit=2");
+  await expect(panel.getByRole("combobox", { name: "Method" })).toHaveValue("GET");
+  await panel.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(panel.getByText(/^200 OK$/)).toBeVisible({ timeout: 15_000 });
+  // Something that is not a curl command is refused, not turned into a request.
+  await panel.getByRole("button", { name: "Import cURL" }).click();
+  await panel.getByRole("textbox", { name: "curl command" }).fill("wget http://example.com");
+  await panel.getByRole("button", { name: "Import", exact: true }).click();
+  await expect(page.getByText("Not a curl command").first()).toBeVisible();
+  await page.getByRole("button", { name: "Close panel" }).click();
+});
+
+test("network throttling cuts a page off, and a HAR export drops credentials", async () => {
+  await go(SHOP);
+  await expect.poll(() => inPage<string>("document.querySelectorAll('.card').length")).toBe(3);
+  await page.getByRole("button", { name: "Network", exact: true }).click();
+  const network = page.getByRole("region", { name: "Network panel" });
+
+  // Offline: the page cannot load; back online it can.
+  await network.getByRole("combobox", { name: "Network throttling" }).selectOption("offline");
+  await go(SHOP + "/?offline=1");
+  await expect(page.getByRole("heading", { name: /Can't reach/ })).toBeVisible({ timeout: 15_000 });
+  await network.getByRole("combobox", { name: "Network throttling" }).selectOption("none");
+  await go(SHOP);
+  await expect.poll(() => inPage<string>("document.querySelectorAll('.card').length")).toBe(3);
+
+  // HAR: a real file, with the request's credentials and tokens removed. (The save dialog is answered for the test.)
+  const target = path.join(userData, "export.har");
+  rmSync(target, { force: true });
+  await app.evaluate(({ session }, file) => {
+    session.defaultSession.once("will-download", (_e, item) => item.setSavePath(file));
+  }, target);
+  await network.getByRole("button", { name: "HAR", exact: true }).click();
+  await expect.poll(() => existsSync(target), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => readFileSync(target, "utf8").length).toBeGreaterThan(100);
+  const har = JSON.parse(readFileSync(target, "utf8"));
+  expect(har.log.version).toBe("1.2");
+  expect(har.log.entries.length).toBeGreaterThan(0);
+  expect(har.log.entries.some((e: { request: { url: string } }) => e.request.url.includes("localhost:7401/api/products"))).toBe(true);
+  expect(JSON.stringify(har)).not.toMatch(/Bearer |set-cookie.*sid=/i);
+  await page.getByRole("button", { name: "Close panel" }).click();
 });
 
 test("Dependencies shows the live SentinelGraph; an investigation and a fix from inside the browser", async () => {
@@ -246,6 +364,90 @@ test("Connect codebase maps a repository into the graph from the SentinelGraph p
   await panel.getByRole("button", { name: "Connect codebase" }).click();
   await expect(page.getByText(/^Mapped /)).toBeVisible();
   await expect(page.getByText(/\d+ services, \d+ databases, \d+ dependencies/)).toBeVisible();
+});
+
+test("a service shows the traffic you browsed to it, can be opened, and live-data setup is one click", async () => {
+  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
+  await expect(panel).toBeVisible();
+  await expect.poll(async () => (await (await fetch(`${API}/api/workspace`)).json()).aliases["localhost:7401"]).toBe("gateway");
+  await panel.getByRole("combobox", { name: "Find a service" }).fill("gateway");
+  const traffic = panel.getByLabel("Traffic to this service");
+  await expect(traffic).toBeVisible({ timeout: 20_000 });          // the page at :7400 called the gateway on :7401
+  await expect(traffic).toContainText("/api/products");
+  await expect(panel.getByRole("button", { name: "Open localhost:7401" })).toBeVisible();
+  const tabsBefore = await tabs().count();
+  await panel.getByRole("button", { name: "Open localhost:7401" }).click();
+  await expect(tabs()).toHaveCount(tabsBefore + 1);
+  await page.getByRole("button", { name: /^Close Sandbox Shop|^Close localhost/ }).last().click();   // close the tab it opened
+
+  await page.getByRole("button", { name: "Dependencies (SentinelGraph)" }).isVisible();
+  await panel.getByRole("button", { name: "Live data", exact: true }).click();
+  const live = panel.getByLabel("Live data setup");
+  await expect(live.getByLabel("Configuration")).toContainText(`${API}/v1/traces`);
+  await live.getByRole("button", { name: "Alertmanager alerts" }).click();
+  await expect(live.getByLabel("Configuration")).toContainText(`${API}/api/alerts/alertmanager`);
+  await live.getByRole("button", { name: "Close" }).click();
+});
+
+test("check my changes: uncommitted work shows which services it affects", async () => {
+  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
+  const marker = path.resolve(__dirname, "../../sandbox/shop/services/inventory/.e2e-impact-marker");
+  writeFileSync(marker, "an uncommitted change\n");
+  try {
+    await panel.getByRole("button", { name: "Check my changes" }).click();
+    const card = panel.getByLabel("Impact of your changes");
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await expect(card.getByText(/HIGH RISK/)).toBeVisible();          // inventory sits under checkout, gateway and web
+    await expect(card.getByRole("button", { name: "inventory", exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "checkout", exact: true })).toBeVisible();
+    await expect(card.getByText(/heuristic/)).toBeVisible();
+    await shot("15-impact");
+    await card.getByRole("button", { name: "Clear" }).click();
+    await expect(card).toBeHidden();
+  } finally {
+    rmSync(marker, { force: true });
+  }
+  // Nothing changed: it says so rather than showing an empty card.
+  await panel.getByRole("button", { name: "Check my changes" }).click();
+  await expect(page.getByText("Nothing to check").first()).toBeVisible();
+});
+
+test("a database can fail and be named the root cause; separate failures are reported as separate, with confidence", async () => {
+  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
+  const reset = await fetch(`${API}/api/reset?keep_memory=true`, { method: "POST" });
+  expect(reset.ok).toBe(true);
+  await expect(panel.getByText("all healthy")).toBeVisible({ timeout: 20_000 });
+
+  // A database is a node of its own: pick it, break it, and the agent names it.
+  await panel.getByRole("combobox", { name: "Find a service" }).fill("orders-db");
+  await expect(panel.getByText("Simulate a failure")).toBeVisible();
+  await panel.getByRole("button", { name: "Crash it" }).click();
+  await expect(panel.getByText(/\d+ unhealthy/)).toBeVisible({ timeout: 20_000 });
+  await panel.getByRole("button", { name: "Investigate", exact: true }).click();
+  await expect(panel.getByText("Root cause:")).toBeVisible({ timeout: 60_000 });
+  await expect(panel.locator("strong", { hasText: /^orders-db$/ })).toBeVisible();
+  await expect(panel.getByLabel("Confidence")).toContainText(/Confidence: (high|medium)/);
+
+  // Two things break at once: two failures, said as two, and never "high" confidence.
+  await panel.getByRole("button", { name: "Restore healthy" }).click();
+  await expect(panel.getByText("all healthy")).toBeVisible({ timeout: 20_000 });
+  await panel.getByRole("combobox", { name: "Find a service" }).fill("catalog");
+  await panel.getByRole("button", { name: "Crash it" }).click();
+  await expect(panel.getByText(/\d+ unhealthy/)).toBeVisible({ timeout: 20_000 });
+  await panel.getByRole("combobox", { name: "Find a service" }).fill("cart");
+  await panel.getByRole("button", { name: "Crash it" }).click();   // added to the failure already there
+  await expect.poll(async () => {
+    const g = await (await fetch(`${API}/api/graph`)).json();
+    return g.nodes.filter((n: { name?: string; status?: string }) => ["catalog", "cart"].includes(n.name ?? "") && n.status === "down").length;
+  }, { timeout: 30_000 }).toBe(2);
+  await panel.getByRole("button", { name: "Investigate", exact: true }).click();
+  await expect(panel.getByText(/2 separate failures/)).toBeVisible({ timeout: 60_000 });
+  await expect(panel.locator("strong", { hasText: /^catalog$/ }).first()).toBeVisible();
+  await expect(panel.locator("strong", { hasText: /^cart$/ }).first()).toBeVisible();
+  await expect(panel.getByLabel("Confidence")).toContainText("Confidence: medium");
+  await shot("16-separate-failures");
+  await panel.getByRole("button", { name: "Restore healthy" }).click();
+  await expect(panel.getByText("all healthy")).toBeVisible({ timeout: 20_000 });
 });
 
 test("a narrow window gives the panel the whole area and keeps the toolbar usable", async () => {
@@ -299,4 +501,24 @@ test("relaunching restores the tabs and the SentinelGraph connection", async () 
   await expect(tabs()).toHaveCount(titles.length);
   await expect(page.getByRole("tab", { name: /Sandbox Shop/ }).first()).toBeVisible();
   await expect(page.getByRole("contentinfo").getByText("SentinelGraph connected")).toBeVisible();
+});
+
+test("sandbox test: load the 38-service company and see the agent scored on what was broken", async () => {
+  test.setTimeout(240_000);
+  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
+  if (!(await panel.isVisible())) await page.getByRole("button", { name: "Dependencies (SentinelGraph)" }).click();
+  await panel.getByRole("button", { name: "Sandbox test", exact: true }).click();
+  const box = panel.getByLabel("Sandbox test", { exact: true }).last();
+  await box.getByRole("button", { name: /Load sandbox|Reload sandbox/ }).click();
+  await expect(box.getByLabel("Sandbox company")).toContainText(/38 services, 8 databases, 8 teams, 18 engineers/, { timeout: 60_000 });
+  await box.getByRole("button", { name: "Run test" }).click();
+  await expect(box.getByLabel("Test result")).toContainText("12 of 12 correct", { timeout: 200_000 });
+  await expect(box.getByText("FOUND").first()).toBeVisible();
+  await expect(box.getByText(/synthetic/)).toBeVisible();
+  await shot("16-sandbox");
+  // The sandbox replaced the shop's map; put it back for whatever runs next.
+  const back = await fetch(`${API}/api/workspace/scan`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: path.resolve(__dirname, "../../sandbox/shop") }),
+  });
+  expect(back.ok).toBe(true);
 });

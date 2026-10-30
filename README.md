@@ -24,9 +24,10 @@ actually broken, what changed, and who owns it?*
 | | |
 | :--- | :--- |
 | **A real browser** | Tabs, split view, separate profiles, device emulation, find, zoom, session restore. Dev servers are one click away (`:3000`, `:5173`, ...). |
-| **Inspect as you browse** | Network, Security and API Client panels dock beside the page. They show the website you are on, with History for everything before. |
+| **Inspect as you browse** | Network (with a real timing waterfall), Security, an API client that really sends requests, and a local AI assistant dock beside the page. Network and Security show the website you are on, with History for everything before. |
 | **A map of your system** | Point DevBrowser at a repository. Services, databases, outside APIs and the connections between them appear; for a monolith, its modules and their imports. |
-| **Root cause, not symptoms** | Break something (or have something break) and press **Investigate**. The agent walks the graph to the one shared dependency, names the change that caused it, and proposes a fix. |
+| **Root cause, not symptoms** | Break something (or have something break) and press **Investigate**. The agent walks the graph to the shared dependency, names the change that caused it, and proposes a fix. It handles databases and several simultaneous failures, and says how sure it is. |
+| **Know the blast radius before you merge** | **Check my changes** shows which services your uncommitted work touches and what depends on them; the same check comments on pull requests in CI. |
 | **You stay in charge** | The agent can only *propose*. Nothing is rolled back, scaled or paged until you approve it. |
 
 <p align="center">
@@ -60,7 +61,7 @@ The first release is not code-signed yet, so macOS and Windows will warn you onc
 | :--- | :--- |
 | [Getting started](docs/GETTING_STARTED.md) | Install, first launch, run the server, connect a project |
 | [User guide](docs/USER_GUIDE.md) | Every feature, shortcuts, troubleshooting |
-| [Testing in the real world](docs/TESTING.md) | A test plan you can run today on your own code, with the results we got |
+| [Testing in the real world](docs/TESTING.md) | A test plan you can run today on your own code, a map-accuracy benchmark, and the results we got |
 | [Security and privacy](docs/SECURITY.md) | What the app and the server can see and do, and what they never send |
 | [Product overview](docs/PRODUCT.md) | What problem this solves and why it matters, with sourced numbers |
 | [Architecture](docs/ARCHITECTURE.md) | How it is built |

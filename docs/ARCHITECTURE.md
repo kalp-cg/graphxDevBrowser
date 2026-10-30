@@ -30,7 +30,7 @@ flowchart LR
 - **The app** never talks to the graph directly. Its main process holds the connection to the server and exposes a
   small typed API to the interface (`src/preload`), so the interface and the pages cannot reach Node, the file system
   or the credentials.
-- **The server** builds the graph (scanner and ingest), and answers questions about it through twelve graph tools. The
+- **The server** builds the graph (scanner and ingest), and answers questions about it through thirteen graph tools. The
   agent is a loop that calls only those tools; it cannot write to the graph except by *proposing* an action.
 - **The graph** is TigerGraph (GSQL, multi-hop traversal and graph algorithms) when `TG_HOST` is set, otherwise an
   embedded engine with the same query surface, so the whole product runs on one laptop with no cloud account.
@@ -80,10 +80,10 @@ graph LR
 A `Service` has a `kind`: `service`, `module` (inside a monolith) or `external` (an outside API). The schema is in
 `backend/sentinel/schema.py`, with a longer description in [data-model.md](data-model.md).
 
-## The twelve graph tools
+## The thirteen graph tools
 
 `get_active_alerts`, `get_service_context`, `trace_dependencies`, `blast_radius`, `find_common_cause`,
-`recent_changes`, `critical_services`, `chokepoints`, `failure_path`, `recall_similar`, `propose_action`,
+`recent_changes`, `critical_services`, `chokepoints`, `failure_path`, `find_root_causes`, `recall_similar`, `propose_action`,
 `conclude_investigation`.
 
 `find_common_cause` is a multi-source search from every alerting service down the dependency edges, and ranks the
