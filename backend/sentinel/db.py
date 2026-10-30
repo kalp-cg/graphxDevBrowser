@@ -1,10 +1,12 @@
 """TigerGraph connection helpers.
 
 Graph logic runs as interpreted GSQL (no install/compile step; the graph is a few hundred vertices). Plain
-creates and attribute updates go through REST++ upserts.
+creates and attribute updates go through REST++ upserts. With GRAPH_BACKEND=local the same calls go to the
+embedded engine in localgraph.py instead of a TigerGraph server.
 """
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from pyTigerGraph import TigerGraphConnection
@@ -47,6 +49,14 @@ def _fresh_token(conn: Graph) -> str:
 
 def get_graph(name: str | None = None) -> Graph:
     name = name or settings.tg_graph
+    if settings.graph_backend == "local":
+        from .localgraph import LocalGraph
+
+        with _lock:
+            conn = _conns.get(name)
+            if conn is None:
+                conn = _conns[name] = LocalGraph(name, Path(settings.local_graph_dir) / f"{name}.json")
+        return conn  # type: ignore[return-value]
     with _lock:
         conn = _conns.get(name)
         if conn is None:

@@ -36,3 +36,5 @@ DevBrowser/release/
 DevBrowser/coverage/
 DevBrowser/*.lcov
 DevBrowser/.nyc_output/
+.sentinel-data/
+sandbox/.data/

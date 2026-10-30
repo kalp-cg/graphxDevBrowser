@@ -6,7 +6,7 @@ from sentinel import db
 
 
 def settings(**over):
-    base = dict(tg_host="https://x.i.tgcloud.io", tg_graph="Sentinel", tg_secret="s3cret", tg_token="",
+    base = dict(graph_backend="tigergraph", tg_host="https://x.i.tgcloud.io", tg_graph="Sentinel", tg_secret="s3cret", tg_token="",
                 tg_username="tigergraph", tg_password="")
     return SimpleNamespace(**{**base, **over})
 

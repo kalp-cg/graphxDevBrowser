@@ -13,6 +13,11 @@ load_dotenv(_ROOT / "backend" / ".env")
 
 @dataclass(frozen=True)
 class Settings:
+    # tigergraph | local (embedded, file-backed: sandbox, tests, single developer). Default: tigergraph when
+    # TG_HOST is set, otherwise local, so a fresh checkout runs with no graph server at all.
+    graph_backend: str = os.getenv("GRAPH_BACKEND", "") or ("tigergraph" if os.getenv("TG_HOST") else "local")
+    local_graph_dir: str = os.getenv("LOCAL_GRAPH_DIR", str(_ROOT / ".sentinel-data"))
+
     tg_host: str = os.getenv("TG_HOST", "http://localhost:14240")
     tg_graph: str = os.getenv("TG_GRAPH", "Sentinel")
     # A secret is preferred: tokens are minted from it and renewed when they expire. A bare token works until
