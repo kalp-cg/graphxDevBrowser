@@ -45,11 +45,11 @@ test("the UI waits for a sleeping API and loads by itself", async ({ page }) => 
   });
   await page.goto("/");
   await expect(page.getByTestId("offline")).toBeVisible();
-  await expect(page.getByText(/tigergraph · \d+ services/)).toHaveCount(0);
+  await expect(page.getByText(/(tigergraph|local graph) · \d+ services/)).toHaveCount(0);
 
   asleep = false;
   await expect(page.getByTestId("offline")).toHaveCount(0, { timeout: 30_000 });
-  await expect(page.getByText(/tigergraph · \d+ services/)).toBeVisible();
+  await expect(page.getByText(/(tigergraph|local graph) · \d+ services/)).toBeVisible();
   await expect(page.getByTestId("scenario-db-pool-exhaustion")).toBeVisible();
 });
 

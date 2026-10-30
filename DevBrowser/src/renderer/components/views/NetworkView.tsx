@@ -10,6 +10,7 @@ import {
 import { useAppStore } from '../../store/useAppStore';
 import { Badge } from '../common/Badge';
 import { ResizableHandle } from '../common/ResizableHandle';
+import { InvestigationPanel, ServiceContextCard } from '../common/SentinelPanels';
 import { EmptyState } from '../common/EmptyState';
 
 export const NetworkView: React.FC = () => {
@@ -319,6 +320,8 @@ export const NetworkView: React.FC = () => {
           <div style={{ flex: 1, overflowY: 'auto', padding: '12px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
             {activeDetailTab === 'headers' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <ServiceContextCard tx={selectedTx} />
+                <InvestigationPanel />
                 <div>
                   <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>
                     GENERAL

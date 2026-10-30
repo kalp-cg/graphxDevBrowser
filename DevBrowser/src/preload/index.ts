@@ -3,6 +3,7 @@ import { IPC_CHANNELS } from '../shared/ipc-channels';
 import type { DevBrowserAPI } from './api';
 import type { AIDebugContext } from '../shared/domain/ai';
 import type { NetworkTransaction } from '../shared/domain/network';
+import type { InvestigationEvidence } from '../shared/domain/sentinel';
 
 const devBrowserAPI: DevBrowserAPI = {
   system: {
@@ -46,8 +47,13 @@ const devBrowserAPI: DevBrowserAPI = {
     status: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_STATUS),
     getGraph: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_GET_GRAPH),
     blastRadius: (service: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_BLAST_RADIUS, { service }),
-    startInvestigation: (question?: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_START_INVESTIGATION, { question })
+    startInvestigation: (question?: string, evidence?: InvestigationEvidence[]) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_START_INVESTIGATION, { question, evidence }),
+    restore: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_RESTORE),
+    resolve: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_RESOLVE, { url }),
+    currentRun: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_CURRENT_RUN),
+    approveAction: (uid: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_APPROVE_ACTION, { uid }),
+    rejectAction: (uid: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_REJECT_ACTION, { uid })
   },
   privacy: {
     triggerNuclearShred: () => ipcRenderer.invoke(IPC_CHANNELS.PRIVACY_TRIGGER_NUCLEAR_SHRED)

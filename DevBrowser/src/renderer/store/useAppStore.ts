@@ -4,7 +4,14 @@ import type { NetworkTransaction } from '../../shared/domain/network';
 import type { ApiRequestDraft, EnvironmentProfile, ApiCollection } from '../../shared/domain/api-client';
 import type { SecurityFinding } from '../../shared/domain/security';
 import type { IGraphNode, IGraphEdge, BlastRadiusResult } from '../../shared/domain/graph';
-import { toBlastRadius, toDevBrowserGraph } from '../../shared/domain/sentinel';
+import {
+  summarizeRun,
+  toBlastRadius,
+  toDevBrowserGraph,
+  toEvidence,
+  type RunSummary,
+  type SentinelResolution
+} from '../../shared/domain/sentinel';
 import type { HardwareMetrics } from '../../shared/ipc-channels';
 
 export type NavigationView = 'browser' | 'network' | 'apiClient' | 'security' | 'dependencies' | 'ai' | 'settings';
@@ -106,8 +113,13 @@ interface AppState {
   sentinelStatus: 'disconnected' | 'connecting' | 'connected';
   sentinelMessage: string;
   connectSentinel: (baseUrl: string, adminToken: string) => Promise<void>;
+  restoreSentinel: () => Promise<void>;
   refreshSentinelGraph: () => Promise<void>;
-  startSentinelInvestigation: (question?: string) => Promise<void>;
+  startSentinelInvestigation: (question?: string, tx?: NetworkTransaction) => Promise<void>;
+  sentinelRun: RunSummary;
+  pollSentinelRun: () => Promise<void>;
+  decideSentinelAction: (uid: string, approve: boolean) => Promise<void>;
+  resolveSentinelUrl: (url: string) => Promise<SentinelResolution | null>;
   executeTigerGraphQuery: (queryPath: string, method?: 'GET' | 'POST', body?: unknown) => Promise<void>;
 
   // AI Assistant
@@ -651,6 +663,17 @@ export const useAppStore = create<AppState>((set, get) => {
       });
       if (status.ok) await get().refreshSentinelGraph();
     },
+    restoreSentinel: async () => {
+      if (!window.devBrowserAPI) return;
+      const saved = await window.devBrowserAPI.sentinel.restore();
+      if (!saved) return; // never configured: stay on the labelled sample graph
+      set({ sentinelUrl: saved.url, sentinelStatus: saved.status.ok ? 'connected' : 'disconnected',
+        sentinelMessage: saved.status.message });
+      if (saved.status.ok) {
+        await get().refreshSentinelGraph();
+        await get().pollSentinelRun(); // pick up an investigation already in progress
+      }
+    },
     refreshSentinelGraph: async () => {
       if (!window.devBrowserAPI || get().sentinelStatus !== 'connected') return;
       try {
@@ -665,7 +688,7 @@ export const useAppStore = create<AppState>((set, get) => {
         set({ sentinelStatus: 'disconnected', sentinelMessage: err instanceof Error ? err.message : String(err) });
       }
     },
-    startSentinelInvestigation: async (question?: string) => {
+    startSentinelInvestigation: async (question?: string, tx?: NetworkTransaction) => {
       if (!window.devBrowserAPI || get().sentinelStatus !== 'connected') {
         get().addToast({
           type: 'warning',
@@ -675,18 +698,66 @@ export const useAppStore = create<AppState>((set, get) => {
         return;
       }
       try {
-        const res = await window.devBrowserAPI.sentinel.startInvestigation(question);
+        const evidence = tx ? toEvidence(tx, get().currentUrl) : null;
+        const res = await window.devBrowserAPI.sentinel.startInvestigation(question, evidence ? [evidence] : []);
+        set({ sentinelRun: { ...summarizeRun(null), phase: 'running' } });
         get().addToast({
           type: 'info',
           title: 'Investigation Launched',
-          message: `SentinelGraph run started (ID: ${res.run_id}). Walking TigerGraph dependency map.`
+          message: `SentinelGraph run ${res.run_id} started${evidence ? ` from ${evidence.method} ${evidence.url}` : ''}.`
         });
+        void get().pollSentinelRun();
       } catch (err) {
         get().addToast({
           type: 'error',
           title: 'Investigation Launch Failed',
           message: err instanceof Error ? err.message : String(err)
         });
+      }
+    },
+    sentinelRun: summarizeRun(null),
+    pollSentinelRun: async () => {
+      if (!window.devBrowserAPI || get().sentinelStatus !== 'connected') return;
+      try {
+        const run = summarizeRun(await window.devBrowserAPI.sentinel.currentRun());
+        const wasRunning = get().sentinelRun.phase === 'running';
+        set({ sentinelRun: run });
+        if (run.phase === 'running') {
+          setTimeout(() => void get().pollSentinelRun(), 1000);
+        } else if (wasRunning) {
+          await get().refreshSentinelGraph();
+          get().addToast({
+            type: run.phase === 'done' ? 'success' : 'error',
+            title: run.phase === 'done' ? 'Investigation Complete' : 'Investigation Failed',
+            message: run.rootCause ? `Root cause: ${run.rootCause}. ${run.proposed.length} action(s) await approval.`
+              : run.report ?? ''
+          });
+        }
+      } catch (err) {
+        set(state => ({ sentinelRun: { ...state.sentinelRun, phase: 'failed',
+          report: err instanceof Error ? err.message : String(err) } }));
+      }
+    },
+    decideSentinelAction: async (uid, approve) => {
+      if (!window.devBrowserAPI) return;
+      try {
+        const api = window.devBrowserAPI.sentinel;
+        const outcome = approve ? (await api.approveAction(uid)).outcome : 'rejected';
+        set(state => ({ sentinelRun: { ...state.sentinelRun, proposed: state.sentinelRun.proposed.map(a =>
+          a.uid === uid ? { ...a, status: approve ? 'executed' : 'rejected', outcome } : a) } }));
+        get().addToast({ type: approve ? 'success' : 'info', title: approve ? 'Action Executed' : 'Action Rejected',
+          message: outcome });
+        await get().refreshSentinelGraph();
+      } catch (err) {
+        get().addToast({ type: 'error', title: 'Action Failed', message: err instanceof Error ? err.message : String(err) });
+      }
+    },
+    resolveSentinelUrl: async (url) => {
+      if (!window.devBrowserAPI || get().sentinelStatus !== 'connected') return null;
+      try {
+        return await window.devBrowserAPI.sentinel.resolve(url);
+      } catch {
+        return null;
       }
     },
     calculateBlastRadiusForNode: (nodeId) => {

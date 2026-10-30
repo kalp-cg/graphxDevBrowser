@@ -175,3 +175,92 @@ export function layeredLayout(nodes: IGraphNode[], edges: IGraphEdge[]):
   });
   return { positions, width, height: Math.max(660, rows.length * ROW_HEIGHT + 80) };
 }
+
+/** `GET /api/resolve?url=`: what the graph knows about the service behind a captured request. */
+export interface SentinelResolution {
+  url: string;
+  host: string;
+  service: string | null;
+  known: boolean;
+  tier?: string;
+  status?: string;
+  team?: string | null;
+  slack_channel?: string | null;
+  on_call?: string[];
+  databases?: string[];
+  blast_radius?: { count: number; by_tier: Record<string, number>; impacted: string[] };
+  recent_changes?: { uid: string; version: string; message: string | null; author: string | null; minutes_ago: number }[];
+}
+
+/** A failed request attached to an investigation ("Investigate this failure"). */
+export interface InvestigationEvidence {
+  url: string;
+  method: string;
+  status_code: number;
+  page_url: string;
+}
+
+/** A remediation the agent proposed; it runs only when a human approves it. */
+export interface SentinelAction {
+  uid: string;
+  kind: string;
+  status: string;
+  target: string | null;
+  reason?: string | null;
+  risk?: string | null;
+  outcome?: string | null;
+}
+
+/** One event of an investigation, as `GET /api/runs/current` (and the WebSocket) delivers them. */
+export interface SentinelRunEvent {
+  type: string;
+  run_id?: string;
+  name?: string;
+  summary?: string;
+  error?: string | null;
+  report?: string;
+  message?: string;
+  root_cause?: string | null;
+  seconds?: number;
+  actions?: SentinelAction[];
+  action?: SentinelAction;
+}
+
+export interface SentinelRun {
+  run_id: string | null;
+  running: boolean;
+  events: SentinelRunEvent[];
+}
+
+/** What the UI shows for a run: where it is, what it found, what waits for approval. */
+export interface RunSummary {
+  phase: 'idle' | 'running' | 'done' | 'failed';
+  steps: { name: string; summary: string; error: boolean }[];
+  rootCause: string | null;
+  report: string | null;
+  seconds: number | null;
+  proposed: SentinelAction[];
+}
+
+/** A failed transaction as evidence, or null if it isn't a server-side failure (a 4xx is the caller's mistake). */
+export function toEvidence(tx: NetworkTransaction, pageUrl: string): InvestigationEvidence | null {
+  const status = tx.statusCode ?? 0;
+  if (!tx.url.startsWith('http') || (status > 0 && status < 500)) return null;
+  return { url: tx.url, method: tx.method, status_code: status, page_url: pageUrl.startsWith('http') ? pageUrl : '' };
+}
+
+export function summarizeRun(run: SentinelRun | null): RunSummary {
+  const empty: RunSummary = { phase: 'idle', steps: [], rootCause: null, report: null, seconds: null, proposed: [] };
+  if (!run || !run.run_id) return empty;
+  const steps = run.events
+    .filter(e => e.type === 'tool_result')
+    .map(e => ({ name: e.name ?? '', summary: e.summary ?? '', error: Boolean(e.error) }));
+  const proposed = run.events.filter(e => e.type === 'action_proposed' && e.action).map(e => e.action as SentinelAction);
+  const last = run.events[run.events.length - 1];
+  if (last?.type === 'error') return { ...empty, phase: 'failed', steps, report: last.message ?? 'Investigation failed' };
+  if (last?.type === 'final') {
+    return { phase: 'done', steps, rootCause: last.root_cause ?? null, report: last.report ?? null,
+      seconds: last.seconds ?? null, proposed };
+  }
+  return { ...empty, phase: 'running', steps, proposed };
+}

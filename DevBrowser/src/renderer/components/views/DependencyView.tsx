@@ -20,6 +20,7 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
+import { InvestigationPanel } from '../common/SentinelPanels';
 import { Badge } from '../common/Badge';
 import { layeredLayout } from '../../../shared/domain/sentinel';
 
@@ -585,6 +586,7 @@ export const DependencyView: React.FC = () => {
             flexShrink: 0,
             overflowY: 'auto'
           }}>
+            <InvestigationPanel />
             {selectedNode && (
               <>
                 <div>

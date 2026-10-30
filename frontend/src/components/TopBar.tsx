@@ -24,6 +24,7 @@ interface Props {
 
 export default function TopBar({ health, api, socket, model, incident }: Props) {
   const db = api === "up" && health?.tigergraph.ok;
+  const engine = health?.backend === "local" ? "local graph" : "tigergraph";
   const modelName = (model ?? health?.llm ?? "").replace(" (deterministic, no LLM)", "");
   return (
     <header className="flex h-12 shrink-0 items-center gap-5 border-b border-line px-4">
@@ -35,7 +36,7 @@ export default function TopBar({ health, api, socket, model, incident }: Props) 
       <div className="flex items-center gap-4 text-[12px] text-muted">
         <Status ok={!!db} warn={api === "connecting"}
                 label={api === "down" ? "api unreachable" : api === "connecting" ? "connecting…"
-                  : db ? `tigergraph · ${health?.tigergraph.services} services` : "tigergraph down"} />
+                  : db ? `${engine} · ${health?.tigergraph.services} services` : `${engine} down`} />
         {api === "up" && <Status ok={socket} label={socket ? "live" : "reconnecting"} />}
         {api === "up" && modelName && (
           <span className="hidden font-mono text-[11.5px] text-faint lg:inline">

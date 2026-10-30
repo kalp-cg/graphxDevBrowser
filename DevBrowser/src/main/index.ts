@@ -1,4 +1,5 @@
 import { app, BrowserWindow } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateEnvironment } from '../shared/env';
@@ -86,7 +87,18 @@ app.whenReady().then(async () => {
   ollamaClient = new OllamaClient(envConfig.OLLAMA_HOST, envConfig.DEFAULT_AI_MODEL);
   credentialVault = new CredentialVault();
   securityAuditor = new PassiveSecurityAuditor();
-  sentinelClient = new SentinelGraphClient(credentialVault);
+  // The SentinelGraph connection survives restarts; the token is saved only as keychain-encrypted ciphertext.
+  const connectionFile = path.join(app.getPath('userData'), 'sentinelgraph.json');
+  sentinelClient = new SentinelGraphClient(credentialVault, undefined, {
+    load: () => {
+      try {
+        return JSON.parse(fs.readFileSync(connectionFile, 'utf8'));
+      } catch {
+        return null;
+      }
+    },
+    save: conn => fs.writeFileSync(connectionFile, JSON.stringify(conn), { mode: 0o600 })
+  });
   const client = sentinelClient;
   cdpInterceptor = new CDPNetworkInterceptor(securityAuditor, (tx, pageUrl) => {
     // Only pages browsed in a <webview> describe the user's system; the app's own UI does not.

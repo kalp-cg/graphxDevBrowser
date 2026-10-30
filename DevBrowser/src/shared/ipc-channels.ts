@@ -31,6 +31,11 @@ export const IPC_CHANNELS = {
   SENTINEL_GET_GRAPH: 'devbrowser:sentinel:getGraph',
   SENTINEL_BLAST_RADIUS: 'devbrowser:sentinel:blastRadius',
   SENTINEL_START_INVESTIGATION: 'devbrowser:sentinel:startInvestigation',
+  SENTINEL_RESTORE: 'devbrowser:sentinel:restore',
+  SENTINEL_RESOLVE: 'devbrowser:sentinel:resolve',
+  SENTINEL_CURRENT_RUN: 'devbrowser:sentinel:currentRun',
+  SENTINEL_APPROVE_ACTION: 'devbrowser:sentinel:approveAction',
+  SENTINEL_REJECT_ACTION: 'devbrowser:sentinel:rejectAction',
 
   // Privacy & Shred
   PRIVACY_TRIGGER_NUCLEAR_SHRED: 'devbrowser:privacy:triggerNuclearShred'

@@ -34,11 +34,8 @@ export const App: React.FC = () => {
       window.devBrowserAPI.system.getHardwareMetrics().then(setHardwareMetrics).catch(console.error);
       checkOllama();
 
-      // Auto-connect to SentinelGraph from saved URL
-      const { sentinelUrl, sentinelStatus, connectSentinel } = useAppStore.getState();
-      if (sentinelUrl && sentinelStatus === 'disconnected') {
-        connectSentinel(sentinelUrl, '').catch(console.error);
-      }
+      // Reconnect to SentinelGraph if it was configured on an earlier launch (token stays in the main process)
+      useAppStore.getState().restoreSentinel().catch(console.error);
 
       // Poll hardware metrics every 8 seconds
       metricsInterval = setInterval(() => {

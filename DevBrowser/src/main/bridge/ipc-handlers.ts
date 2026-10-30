@@ -10,6 +10,7 @@ import { OllamaClient } from '../ai/ollama-client';
 import { CredentialVault } from '../crypto/vault';
 import { PassiveSecurityAuditor } from '../security/auditor';
 import type { SentinelGraphClient } from '../integrations/sentinel-client';
+import type { InvestigationEvidence } from '../../shared/domain/sentinel';
 
 let handlersRegistered = false;
 
@@ -211,8 +212,28 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.SENTINEL_BLAST_RADIUS, async (_event, args: { service: string }) =>
     sentinelClient.blastRadius(args.service));
 
-  ipcMain.handle(IPC_CHANNELS.SENTINEL_START_INVESTIGATION, async (_event, args?: { question?: string }) =>
-    sentinelClient.startInvestigation(args?.question));
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_START_INVESTIGATION,
+    async (_event, args?: { question?: string; evidence?: InvestigationEvidence[] }) => {
+      await sentinelClient.flush(); // the graph should include what led up to the failure
+      return sentinelClient.startInvestigation(args?.question, args?.evidence ?? []);
+    });
+
+  // Reconnect with the saved connection: the URL comes back, the token never leaves the main process.
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_RESTORE, async () => {
+    if (!sentinelClient.restore()) return null;
+    return { url: sentinelClient.url, status: await sentinelClient.status() };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_RESOLVE, async (_event, args: { url: string }) =>
+    sentinelClient.resolve(args.url));
+
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_CURRENT_RUN, async () => sentinelClient.currentRun());
+
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_APPROVE_ACTION, async (_event, args: { uid: string }) =>
+    sentinelClient.approveAction(args.uid));
+
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_REJECT_ACTION, async (_event, args: { uid: string }) =>
+    sentinelClient.rejectAction(args.uid));
 
   // 3. AI Execution & Diagnosis
   ipcMain.handle(IPC_CHANNELS.AI_EXECUTE_DIAGNOSIS, async (_event, args: { context: AIDebugContext }) => {

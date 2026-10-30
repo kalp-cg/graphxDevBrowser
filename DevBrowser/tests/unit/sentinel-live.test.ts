@@ -9,7 +9,7 @@ const url = process.env.SENTINEL_URL;
 const plain = { encryptSecret: (s: string) => s, decryptSecret: (s: string) => s };
 
 describe.skipIf(!url)('SentinelGraph live', () => {
-  it('sends captured traffic, then sees it in the graph and its blast radius', async () => {
+  it('sends captured traffic: it shapes the graph but never its health', async () => {
     const client = new SentinelGraphClient(plain);
     client.configure(url!, process.env.SENTINEL_ADMIN_TOKEN ?? '');
     expect((await client.status()).ok).toBe(true);
@@ -25,7 +25,8 @@ describe.skipIf(!url)('SentinelGraph live', () => {
     const { nodes, edges } = toDevBrowserGraph(await client.getGraph());
     client.dispose();
     expect(nodes.find(n => n.id === 'svc:web:localhost:4000')?.type).toBe('FrontendRoute');
-    expect(nodes.find(n => n.id === 'svc:devbrowser-api.local')?.metadata.status).toBe('down');
+    // Passive capture is topology only: a developer's failing clicks must not mark services down or page anyone.
+    expect(nodes.find(n => n.id === 'svc:devbrowser-api.local')?.metadata.status).toBe('healthy');
     expect(edges).toContainEqual(expect.objectContaining({
       sourceId: 'svc:web:localhost:4000', targetId: 'svc:devbrowser-api.local', type: 'DEPENDS_ON'
     }));

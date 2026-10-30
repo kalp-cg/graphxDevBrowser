@@ -89,6 +89,7 @@ export interface Incident {
 
 export interface Health {
   tigergraph: { ok: boolean; services?: number; error?: string };
+  backend?: "tigergraph" | "local"; // "local": the embedded engine (sandbox, single developer), not TigerGraph
   graph: string;
   llm: string;
   providers?: string[];

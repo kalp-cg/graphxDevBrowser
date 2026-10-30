@@ -194,3 +194,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   background-size: 24px 24px;
 }
 
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.animate-spin {
+  animation: spin 1s linear infinite;
+}

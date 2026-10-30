@@ -80,16 +80,23 @@ What happens then:
 
 * **Real topology:** services, web apps and databases come from the TigerGraph graph, laid out in dependency layers.
 * **Browsing feeds the graph:** every API call a page in the `<webview>` makes (captured over CDP) is batched and
-  sent to `POST /api/browser-traffic`. The page's origin becomes a `web:<host>` app that depends on each API host;
-  5xx responses count as failures of that host. Page assets and 4xx responses are ignored.
+  sent to `POST /api/browser-traffic`. The page's origin depends on each API host; after a codebase scan both
+  resolve to the scanned services (`localhost:7404` is `checkout`), otherwise the page is a `web:<host>` app.
+  Passive capture is topology only: it never changes health or fires alerts. Page assets and 4xx are ignored.
+* **Service context:** selecting a request in the Network panel shows the service behind it, its owner,
+  on-call, health, blast radius and recent changes (`GET /api/resolve`).
+* **Investigate this failure:** on a 5xx, starts an investigation with that request as evidence, streams the
+  agent's steps into the panel and lets you approve or reject the actions it proposes.
+* **Reconnects on launch:** the URL and the keychain-encrypted token are saved in the app's user data.
 * **Blast radius** runs as a GSQL traversal in TigerGraph (`GET /api/services/{name}/blast-radius`, up to 6 hops),
   not just the direct neighbours.
 * **Credentials:** TigerGraph credentials stay on the SentinelGraph server. The admin token is handed to the main
   process once and kept encrypted there (`safeStorage`); the renderer never stores it.
 
 Code: `src/main/integrations/sentinel-client.ts` (API client, traffic batching),
-`src/shared/domain/sentinel.ts` (mapping and layout), tests in `tests/unit/sentinel-*.test.ts`. The live test runs
-against a real API with `SENTINEL_URL=http://localhost:8100 SENTINEL_ADMIN_TOKEN=... npm test`.
+`src/shared/domain/sentinel.ts` (mapping and layout), tests in `tests/unit/sentinel-*.test.ts`. The live tests run
+against a real API with `SENTINEL_URL=http://localhost:8100 SENTINEL_ADMIN_TOKEN=... npm test`, and the full
+incident loop against the sandbox (`../sandbox/README.md`) with `SENTINEL_SANDBOX=1`.
 
 ---
 

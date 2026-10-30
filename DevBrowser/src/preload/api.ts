@@ -4,7 +4,15 @@ import type { SecurityFinding } from '../shared/domain/security';
 import type { ShredResult } from '../shared/domain/privacy';
 import type { AIDebugContext, AICodeDiff } from '../shared/domain/ai';
 import type { NetworkTransaction } from '../shared/domain/network';
-import type { SentinelBlastRadius, SentinelSnapshot, SentinelStatus } from '../shared/domain/sentinel';
+import type {
+  InvestigationEvidence,
+  SentinelAction,
+  SentinelBlastRadius,
+  SentinelResolution,
+  SentinelRun,
+  SentinelSnapshot,
+  SentinelStatus
+} from '../shared/domain/sentinel';
 
 export interface DevBrowserAPI {
   system: {
@@ -34,7 +42,12 @@ export interface DevBrowserAPI {
     status: () => Promise<SentinelStatus>;
     getGraph: () => Promise<SentinelSnapshot>;
     blastRadius: (service: string) => Promise<SentinelBlastRadius>;
-    startInvestigation: (question?: string) => Promise<{ run_id: string }>;
+    startInvestigation: (question?: string, evidence?: InvestigationEvidence[]) => Promise<{ run_id: string }>;
+    restore: () => Promise<{ url: string; status: SentinelStatus } | null>;
+    resolve: (url: string) => Promise<SentinelResolution>;
+    currentRun: () => Promise<SentinelRun>;
+    approveAction: (uid: string) => Promise<{ outcome: string; action: SentinelAction }>;
+    rejectAction: (uid: string) => Promise<SentinelAction>;
   };
   privacy: {
     triggerNuclearShred: () => Promise<ShredResult>;

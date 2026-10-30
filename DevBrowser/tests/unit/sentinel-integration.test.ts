@@ -1,12 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import {
   layeredLayout,
+  summarizeRun,
   toBlastRadius,
   toDevBrowserGraph,
+  toEvidence,
   toTrafficRecord,
   type SentinelSnapshot
 } from '../../src/shared/domain/sentinel';
-import { SentinelGraphClient, type SecretStore } from '../../src/main/integrations/sentinel-client';
+import {
+  SentinelGraphClient,
+  type SavedConnection,
+  type SecretStore
+} from '../../src/main/integrations/sentinel-client';
 import type { NetworkTransaction } from '../../src/shared/domain/network';
 
 const snapshot: SentinelSnapshot = {
@@ -166,5 +172,109 @@ describe('SentinelGraphClient', () => {
     expect(res.run_id).toBe('run-test-42');
     expect(calls[0]!.url).toBe('http://localhost:8100/api/runs');
     expect((calls[0]!.init.headers as Record<string, string>)['X-Admin-Token']).toBe('admin-token');
+  });
+});
+
+describe('Investigate this failure', () => {
+  const tx = (statusCode: number | undefined) => ({
+    id: 'tx', url: 'http://localhost:7401/api/checkout', method: 'POST', statusCode, mimeType: 'application/json',
+    requestHeaders: {}, startTime: 1, endTime: 2
+  }) as unknown as NetworkTransaction;
+
+  it('turns server-side failures into evidence, not client mistakes', () => {
+    expect(toEvidence(tx(502), 'http://localhost:7400/')).toEqual({
+      url: 'http://localhost:7401/api/checkout', method: 'POST', status_code: 502, page_url: 'http://localhost:7400/'
+    });
+    expect(toEvidence(tx(undefined), 'about:blank')).toMatchObject({ status_code: 0, page_url: '' }); // no response
+    expect(toEvidence(tx(404), 'http://localhost:7400/')).toBeNull();
+    expect(toEvidence(tx(200), 'http://localhost:7400/')).toBeNull();
+  });
+
+  it('summarizes a run as it streams in', () => {
+    expect(summarizeRun(null).phase).toBe('idle');
+    const action = { uid: 'act:1', kind: 'rollback', status: 'pending', target: 'inventory', risk: 'medium' };
+    const events = [
+      { type: 'run_started', run_id: 'r1' },
+      { type: 'tool_call', run_id: 'r1', name: 'get_active_alerts' },
+      { type: 'tool_result', run_id: 'r1', name: 'get_active_alerts', summary: '3 alerts firing' },
+      { type: 'action_proposed', run_id: 'r1', action }
+    ];
+    const running = summarizeRun({ run_id: 'r1', running: true, events });
+    expect(running).toMatchObject({ phase: 'running', steps: [{ name: 'get_active_alerts', summary: '3 alerts firing' }] });
+    expect(running.proposed).toEqual([action]);
+    const done = summarizeRun({ run_id: 'r1', running: false, events: [...events,
+      { type: 'final', run_id: 'r1', root_cause: 'inventory', report: 'ok', seconds: 4.2 }] });
+    expect(done).toMatchObject({ phase: 'done', rootCause: 'inventory', seconds: 4.2 });
+    expect(summarizeRun({ run_id: 'r1', running: false, events: [{ type: 'error', message: 'boom' }] }))
+      .toMatchObject({ phase: 'failed', report: 'boom' });
+  });
+});
+
+describe('SentinelGraphClient integration surface', () => {
+  const vault: SecretStore = {
+    encryptSecret: s => `enc:${s}`,
+    decryptSecret: s => s.replace(/^enc:/, '')
+  };
+  const fetchJson = (bodies: unknown[]) => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const impl = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify(bodies.shift() ?? {}), { status: 200 });
+    }) as unknown as typeof fetch;
+    return { impl, calls };
+  };
+
+  it('saves the connection encrypted and restores it on the next launch', async () => {
+    let saved: SavedConnection | null = null;
+    const store = { load: () => saved, save: (c: SavedConnection) => { saved = c; } };
+    const first = new SentinelGraphClient(vault, fetchJson([]).impl, store);
+    expect(first.restore()).toBe(false);
+    first.configure('http://localhost:8200/', 'sandbox-token');
+    first.dispose();
+    expect(saved).toEqual({ baseUrl: 'http://localhost:8200', encryptedToken: 'enc:sandbox-token' });
+
+    const { impl, calls } = fetchJson([{ run_id: 'r9' }]);
+    const next = new SentinelGraphClient(vault, impl, store);
+    expect(next.restore()).toBe(true);
+    await next.startInvestigation(undefined, [{ url: 'http://x/a', method: 'GET', status_code: 503, page_url: '' }]);
+    next.dispose();
+    expect((calls[0]!.init.headers as Record<string, string>)['X-Admin-Token']).toBe('sandbox-token');
+    expect(JSON.parse(calls[0]!.init.body as string).evidence).toHaveLength(1);
+  });
+
+  it('resolves URLs once per host and never caches a failure', async () => {
+    const calls: string[] = [];
+    let fail = true;
+    const impl = (async (url: string) => {
+      calls.push(url);
+      if (fail) { fail = false; return new Response('down', { status: 503 }); }
+      return new Response(JSON.stringify({ service: 'checkout', known: true }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const client = new SentinelGraphClient(vault, impl);
+    client.configure('http://localhost:8200', 't');
+    await expect(client.resolve('http://localhost:7404/a')).rejects.toThrow('HTTP 503');
+    expect((await client.resolve('http://localhost:7404/a')).service).toBe('checkout');
+    expect((await client.resolve('http://localhost:7404/b?x=1')).service).toBe('checkout'); // same host: cached
+    await expect(client.resolve('not a url')).rejects.toThrow('not a URL');
+    client.dispose();
+    expect(calls).toEqual([
+      'http://localhost:8200/api/resolve?url=http%3A%2F%2Flocalhost%3A7404%2Fa',
+      'http://localhost:8200/api/resolve?url=http%3A%2F%2Flocalhost%3A7404%2Fa'
+    ]);
+  });
+
+  it('approves and rejects actions by uid', async () => {
+    const { impl, calls } = fetchJson([{ outcome: 'rolled back' }, { status: 'rejected' }, { run_id: 'r', events: [] }]);
+    const client = new SentinelGraphClient(vault, impl);
+    client.configure('http://localhost:8200', 't');
+    expect((await client.approveAction('act:ab12')).outcome).toBe('rolled back');
+    await client.rejectAction('act:cd34');
+    await client.currentRun();
+    client.dispose();
+    expect(calls.map(c => [c.init.method, c.url])).toEqual([
+      ['POST', 'http://localhost:8200/api/actions/act%3Aab12/approve'],
+      ['POST', 'http://localhost:8200/api/actions/act%3Acd34/reject'],
+      ['GET', 'http://localhost:8200/api/runs/current']
+    ]);
   });
 });

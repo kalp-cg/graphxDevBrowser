@@ -15,7 +15,7 @@ export async function openApp(page: Page) {
   // The UI asks for the admin token on the first write; seed it so the tests never see the prompt.
   await page.addInitScript((t) => localStorage.setItem("sentinel-admin-token", t), ADMIN_TOKEN);
   await page.goto("/");
-  await expect(page.getByText(/tigergraph · \d+ services/)).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByText(/(tigergraph|local graph) · \d+ services/)).toBeVisible({ timeout: 90_000 });
   await expect(page.getByText("live", { exact: true })).toBeVisible();
   // The header comes from /api/health; the graph is a separate (slower) request on remote hosting.
   await expect(page.getByTestId("graph")).toHaveAttribute("data-ready", "true", { timeout: 60_000 });

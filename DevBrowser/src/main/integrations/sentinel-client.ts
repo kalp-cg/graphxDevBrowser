@@ -1,6 +1,10 @@
 import type {
   BrowserTrafficRecord,
+  InvestigationEvidence,
+  SentinelAction,
   SentinelBlastRadius,
+  SentinelResolution,
+  SentinelRun,
   SentinelSnapshot,
   SentinelStatus
 } from '../../shared/domain/sentinel';
@@ -11,8 +15,20 @@ export interface SecretStore {
   decryptSecret(ciphertext: string): string;
 }
 
+/** Where the connection is kept between launches. The token is stored only in its encrypted form. */
+export interface ConnectionStore {
+  load(): SavedConnection | null;
+  save(conn: SavedConnection): void;
+}
+
+export interface SavedConnection {
+  baseUrl: string;
+  encryptedToken: string;
+}
+
 const FLUSH_INTERVAL_MS = 5000;
 const MAX_BUFFER = 500;
+const RESOLVE_TTL_MS = 30_000;
 
 /**
  * Talks to a SentinelGraph API from the main process. The admin token never reaches the renderer: it is
@@ -24,10 +40,12 @@ export class SentinelGraphClient {
   private encryptedToken = '';
   private buffer: BrowserTrafficRecord[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
+  private resolved = new Map<string, { at: number; value: Promise<SentinelResolution> }>();
 
   constructor(
     private readonly vault: SecretStore,
-    private readonly fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis)
+    private readonly fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+    private readonly store: ConnectionStore | null = null
   ) {}
 
   public configure(baseUrl: string, adminToken: string): void {
@@ -35,7 +53,27 @@ export class SentinelGraphClient {
     if (adminToken) {
       this.encryptedToken = this.vault.encryptSecret(adminToken);
     }
+    this.store?.save({ baseUrl: this.baseUrl, encryptedToken: this.encryptedToken });
+    this.start();
+  }
+
+  /** Reconnect with the connection saved on the last launch. Returns false if there is none. */
+  public restore(): boolean {
+    const saved = this.store?.load();
+    if (!saved?.baseUrl) return false;
+    this.baseUrl = saved.baseUrl;
+    this.encryptedToken = saved.encryptedToken;
+    this.start();
+    return true;
+  }
+
+  public get url(): string {
+    return this.baseUrl;
+  }
+
+  private start(): void {
     this.buffer = [];
+    this.resolved.clear();
     if (!this.timer && this.baseUrl) {
       this.timer = setInterval(() => void this.flush(), FLUSH_INTERVAL_MS);
       this.timer.unref?.();
@@ -68,10 +106,39 @@ export class SentinelGraphClient {
     return this.request('GET', `/api/services/${encodeURIComponent(service)}/blast-radius`);
   }
 
-  public startInvestigation(question?: string): Promise<{ run_id: string }> {
+  public startInvestigation(question?: string, evidence: InvestigationEvidence[] = []): Promise<{ run_id: string }> {
     return this.request('POST', '/api/runs', {
-      question: question ?? 'Alerts are firing. Investigate, find the root cause and fix it.'
+      question: question ?? 'Alerts are firing. Investigate, find the root cause and fix it.',
+      evidence
     });
+  }
+
+  /** The service behind a URL, with owner, health and blast radius. Cached per host for a short while. */
+  public resolve(url: string): Promise<SentinelResolution> {
+    let host: string;
+    try {
+      host = new URL(url).host;
+    } catch {
+      return Promise.reject(new Error(`not a URL: ${url}`));
+    }
+    const hit = this.resolved.get(host);
+    if (hit && Date.now() - hit.at < RESOLVE_TTL_MS) return hit.value;
+    const value = this.request<SentinelResolution>('GET', `/api/resolve?url=${encodeURIComponent(url)}`);
+    this.resolved.set(host, { at: Date.now(), value });
+    value.catch(() => this.resolved.delete(host)); // never cache a failure
+    return value;
+  }
+
+  public currentRun(): Promise<SentinelRun> {
+    return this.request('GET', '/api/runs/current');
+  }
+
+  public approveAction(uid: string): Promise<{ outcome: string; action: SentinelAction }> {
+    return this.request('POST', `/api/actions/${encodeURIComponent(uid)}/approve`);
+  }
+
+  public rejectAction(uid: string): Promise<SentinelAction> {
+    return this.request('POST', `/api/actions/${encodeURIComponent(uid)}/reject`);
   }
 
   /** Queue a captured API call; it is sent with the next batch. Oldest records drop if the API is away. */
