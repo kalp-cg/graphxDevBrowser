@@ -352,7 +352,7 @@ def test_a_database_is_a_service_that_can_fail_and_be_the_root_cause(api, graph)
     api.post("/api/workspace", json=codebase.scan(SHOP))
     # Drawn once, as a database, with its callers depending on it.
     snap = api.get("/api/graph").json()
-    dbs = [n for n in snap["nodes"] if n["name"] == "orders-db"]
+    dbs = [n for n in snap["nodes"] if n.get("name") == "orders-db"]
     assert [(n["type"], n["id"]) for n in dbs] == [("Database", "svc:orders-db")]
     assert any(l["type"] == "DEPENDS_ON" and l["source"] == "svc:inventory" and l["target"] == "svc:orders-db"
                for l in snap["links"])
@@ -395,7 +395,9 @@ def test_one_failure_is_still_reported_as_one(api, graph):
 
 
 def test_the_answer_says_how_sure_it_is_and_why(api, graph):
-    api.post("/api/workspace", json=codebase.scan(SHOP))
+    manifest = codebase.scan(SHOP)
+    manifest["changes"] = []   # a fresh checkout has "just changed" every file; only the deployments injected below count here
+    api.post("/api/workspace", json=manifest)
     api.post("/api/chaos/inventory?mode=down&deploy=true")        # a deployment just before the alerts
     final = _investigate(api)[-1]
     assert final["confidence"] == "high"
