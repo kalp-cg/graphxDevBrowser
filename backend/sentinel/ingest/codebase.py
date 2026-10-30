@@ -27,6 +27,7 @@ from typing import Any
 import yaml
 
 from ..db import Batch, Graph, link, upsert
+from .modules import scan_modules
 from .otel import record_change
 
 COMPOSE_FILES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
@@ -140,16 +141,21 @@ def _service_dir(repo: Path, name: str, context: str, dockerfile: str) -> str:
 
     if context and context not in (".", "./", "/") and inside(context):
         return Path(context).as_posix().removeprefix("./").rstrip("/")
+    def looks_like_service(rel: str) -> bool:
+        # `app/` in a Next.js repo is the page router, not the service called `app`: a service folder has a manifest
+        # or a Dockerfile.
+        return bool(_language(repo / rel)) or (repo / rel / "Dockerfile").is_file()
+
     for root in CODE_ROOTS:
         rel = f"{root}/{name}".strip("/")
-        if inside(rel):
+        if inside(rel) and looks_like_service(rel):
             return rel
     # `spring-petclinic-api-gateway/` for the service `api-gateway`: a unique folder ending in the service name
     for root in CODE_ROOTS:
         base = repo / root if root else repo
         hits = [d.name for d in base.iterdir() if d.is_dir() and not d.name.startswith(".")
                 and d.name.endswith(f"-{name}")] if base.is_dir() else []
-        if len(hits) == 1:
+        if len(hits) == 1 and looks_like_service(f"{root}/{hits[0]}".strip("/")):
             return f"{root}/{hits[0]}".strip("/")
     if dockerfile:
         parent = Path(dockerfile).parent.as_posix().removeprefix("./")
@@ -376,6 +382,83 @@ def _git_changes(repo: Path, paths: dict[str, str], since: str) -> list[dict]:
     return changes
 
 
+def _git_module_changes(repo: Path, since: str, module_of: Any, names: set[str]) -> list[dict]:
+    """Commits per module of a monolith: each file a commit touched belongs to one module."""
+    try:
+        out = subprocess.run(["git", "-C", str(repo), "log", f"--since={since}", "--name-only", "--format=@@%H|%an|%at|%s"],
+                             capture_output=True, text=True, check=True).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+    changes, count = [], {n: 0 for n in names}
+    for block in out.split("@@")[1:]:
+        head, *files = [line for line in block.splitlines() if line.strip()]
+        sha, author, at, subject = head.split("|", 3)
+        by_module: dict[str, list[str]] = {}
+        for f in files:
+            m = module_of(f)
+            if m in names:
+                by_module.setdefault(m, []).append(f)
+        for m, touched in by_module.items():
+            if count[m] < MAX_CHANGES_PER_SERVICE:
+                count[m] += 1
+                changes.append({"service": m, "sha": sha[:10], "author": author, "at": int(at) * 1000,
+                                "message": subject, "files": touched})
+    return changes
+
+
+def _expand_monolith(repo: Path, services: dict[str, dict], databases: dict[str, str], deps: set[tuple[str, str]],
+                     aliases: dict[str, str], rules: list[tuple[str, str]], since: str) -> dict[str, Any] | None:
+    """One deployable built from the repo root: its modules are what there is to map. Replaces the single service by
+    its modules, the imports between them, and what each one calls (databases, outside APIs)."""
+    mono = next(iter(services.values()), None)
+    if len(services) != 1 or mono is None or mono["path"]:
+        return None
+    found = scan_modules(repo)
+    if not found:
+        return None
+    mods = found["modules"]
+    if "root" in mods and len(mods) >= 4:
+        mods = {n: m for n, m in mods.items() if n != "root"}  # config files at the repo root
+    if len(mods) < 2:
+        return None
+    new_services: dict[str, dict] = {}
+    for name, m in mods.items():
+        entry = name == "app" or name.startswith(("api", "pages"))
+        new_services[name] = {
+            "name": name, "kind": "module", "path": m["path"], "published": False,
+            "language": mono["language"] or ("python" if m["py"] > m["js"] else "javascript"),
+            "tier": mono["tier"], "revenue_per_min": 0,
+            "team": mono.get("team") or (_owner(rules, m["path"]) if m["path"] else None),
+            "layer": mono["layer"] or ("edge" if entry else "business")}
+    new_dbs = dict(databases)
+    new_deps = {(a, b) for a, b in found["dependencies"] if a in new_services and b in new_services}
+    reached: set[str] = set()
+    for mod, outside in found["outside"].items():
+        if mod not in new_services:
+            continue
+        for name, kind, engine in outside:
+            if kind == "database":
+                target = next((n for n, e in databases.items() if e == engine), None)
+                if target is None:
+                    target = name
+                    new_dbs.setdefault(target, engine or "database")
+                new_deps.add((mod, target))
+                reached.add(target)
+            else:
+                new_services.setdefault(name, {"name": name, "kind": "external", "path": "", "language": "", "tier": "medium",
+                                               "revenue_per_min": 0, "team": None, "published": False, "layer": "platform"})
+                new_deps.add((mod, name))
+    edge = [n for n, sv in new_services.items() if sv["layer"] == "edge" and sv["kind"] == "module"]
+    for a, b in deps:  # what the compose file says the app depends on, when no module's code says it
+        if a == mono["name"] and b in databases and b not in reached:
+            new_deps |= {(m, b) for m in edge}
+    entry = "app" if "app" in new_services else (edge[0] if edge else next(iter(new_services)))
+    new_aliases = {k: (entry if v == mono["name"] else v) for k, v in aliases.items()}
+    new_aliases[entry] = entry
+    changes = _git_module_changes(repo, since, found["module_of"], set(new_services))
+    return {"services": new_services, "databases": new_dbs, "deps": new_deps, "aliases": new_aliases, "changes": changes}
+
+
 def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
     """Everything the repository declares about the system, as a manifest (plain JSON)."""
     repo = repo.resolve()
@@ -418,7 +501,8 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
             tier = labels.get("sentinel.tier", "medium")
             services[name] = {
                 "name": name, "path": rel,
-                "language": _language(repo / rel, _dockerfile(repo, context, dockerfile)) if rel or dockerfile else "",
+                "language": (_language(repo / rel, _dockerfile(repo, context, dockerfile))
+                             if rel or dockerfile or (build and context in ("", ".")) else ""),
                 "tier": tier if tier in TIERS else "medium",
                 "revenue_per_min": int(labels.get("sentinel.revenue_per_min", "0") or 0),
                 "team": labels.get("sentinel.team") or (_owner(rules, rel) if rel else None),
@@ -451,6 +535,16 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
                                         "revenue_per_min": 0, "team": _owner(rules, rel), "published": False,
                                         "layer": None}
 
+    if compose is None and k8s is None and not services and _language(repo):
+        # No compose file and no services folders: the repository is one application.
+        name = re.sub(r"[^a-z0-9-]+", "-", repo.name.lower()).strip("-") or "app"
+        services[name] = {"name": name, "path": "", "language": _language(repo), "tier": "medium", "revenue_per_min": 0,
+                          "team": _owner(rules, ""), "published": False, "layer": None}
+    expanded = _expand_monolith(repo, services, databases, deps, aliases, rules, since)
+    if expanded:
+        services, databases, deps = expanded["services"], expanded["databases"], expanded["deps"]
+        aliases = expanded["aliases"]
+
     # Unless labelled: entry points (published, nothing in the repo calls them) are the edge, the rest business.
     called = {b for _a, b in deps}
     for s in services.values():
@@ -463,8 +557,10 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
         "dependencies": sorted([a, b] for a, b in deps),
         "aliases": dict(sorted(aliases.items())),
         "ignored": sorted(ignored),
-        "changes": _git_changes(repo, {s["name"]: s["path"] for s in services.values()}, since),
-        "source": "docker-compose" if compose is not None else "kubernetes" if k8s is not None else "directories",
+        "changes": (expanded["changes"] if expanded else
+                    _git_changes(repo, {s["name"]: s["path"] for s in services.values()}, since)),
+        "source": ("docker-compose" if compose is not None else "kubernetes" if k8s is not None else "directories")
+                  + (" + code imports" if expanded else ""),
     }
 
 
@@ -475,7 +571,7 @@ def apply(graph: Graph, manifest: dict[str, Any]) -> dict[str, Any]:
     db_names = {d["name"] for d in manifest["databases"]}
     batch = Batch()
     upsert(batch, "Service", [
-        {"uid": f"svc:{s['name']}", "name": s["name"], "kind": "service", "tier": s["tier"], "layer": s["layer"],
+        {"uid": f"svc:{s['name']}", "name": s["name"], "kind": s.get("kind", "service"), "tier": s["tier"], "layer": s["layer"],
          "language": s["language"], "revenue_per_min": s["revenue_per_min"],
          **({} if f"svc:{s['name']}" in existing else {"status": "healthy", "root_fault": False})}
         for s in manifest["services"]

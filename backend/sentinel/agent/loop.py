@@ -70,7 +70,8 @@ def summarize(name: str, res: dict) -> str:
                     else "no similar past incidents")
         if name == "get_service_context":
             oc = ", ".join(p["name"] for p in r["on_call"]) or "nobody"
-            return f"{r['service']['name']} is owned by {r['team']}; on call: {oc}"
+            owner = f"is owned by {r['team']}" if r.get("team") else "has no owner (no CODEOWNERS entry)"
+            return f"{r['service']['name']} {owner}; on call: {oc}"
         if name == "blast_radius":
             tiers = ", ".join(f"{v} {k}" for k, v in r["by_tier"].items())
             return f"{r['count']} upstream services at risk ({tiers})"

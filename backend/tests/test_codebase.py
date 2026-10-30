@@ -128,6 +128,62 @@ def test_scan_finds_compose_in_deploy_folder_and_survives_odd_yaml(tmp_path):
         codebase.scan(tmp_path)
 
 
+def _nextjs_monolith(root, compose: bool):
+    def write(rel, text=""):
+        f = root / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(text)
+    write("package.json", '{"dependencies": {"next": "14", "@prisma/client": "5"}}')
+    write("tsconfig.json", '{\n // comments and trailing commas are normal here\n "compilerOptions": {"paths": {"@/*": ["./*"],},},\n}')
+    write("prisma/schema.prisma", 'datasource db {\n  provider = "postgresql"\n  url = env("DATABASE_URL")\n}')
+    write("lib/prisma.ts", "import { PrismaClient } from '@prisma/client'\nexport const db = new PrismaClient()")
+    write("lib/ai/agent.ts", "import { db } from '@/lib/prisma'\nconst k = process.env.GEMINI_API_KEY\nexport const run = () => db")
+    write("lib/billing/invoice.ts", "import { run } from '../ai/agent'\nexport const x = run")
+    write("app/api/orders/route.ts", "import { x } from '@/lib/billing/invoice'\nexport const GET = x")
+    write("app/api/orders/[id]/route.ts", "import { run } from '@/lib/ai/agent'\nexport const GET = run")
+    write("app/api/health/route.ts", "export const GET = () => 'ok'")
+    write("app/page.tsx", "import Nav from '@/components/Nav'\nexport default Nav")
+    write("components/Nav.tsx", "export default () => null")
+    write("lib/ai/agent.test.ts", "import { run } from './agent'")  # tests are not modules
+    write("next.config.ts", "export default {}")
+    write(".env.example", "DATABASE_URL=\nGEMINI_API_KEY=\nQDRANT_URL=\n")  # QDRANT is declared, never used
+    if compose:
+        write("docker-compose.yml", "services:\n  app:\n    build: {context: ., dockerfile: Dockerfile}\n    depends_on: [postgres]\n"
+                                    "    ports: ['3000:3000']\n  postgres:\n    image: postgres:15\n")
+        write("Dockerfile", "FROM node:20\n")
+
+
+@pytest.mark.parametrize("compose", [True, False])
+def test_scan_maps_the_modules_of_a_monolith(tmp_path, compose):
+    _nextjs_monolith(tmp_path, compose)
+    m = codebase.scan(tmp_path)
+    svc = {s["name"]: s for s in m["services"]}
+    assert set(svc) == {"api.orders", "api.health", "app", "components", "lib", "lib.ai", "lib.billing", "gemini-api"}
+    assert svc["api.orders"]["layer"] == "edge" and svc["lib.ai"]["layer"] == "business"
+    assert svc["gemini-api"]["kind"] == "external" and svc["gemini-api"]["layer"] == "platform"
+    assert all(svc[n]["kind"] == "module" for n in svc if n != "gemini-api") and svc["lib.ai"]["language"] == "typescript"
+    deps = {tuple(d) for d in m["dependencies"]}
+    assert {("api.orders", "lib.billing"), ("api.orders", "lib.ai"), ("lib.billing", "lib.ai"), ("lib.ai", "lib"),
+            ("app", "components"), ("lib.ai", "gemini-api")} <= deps
+    db = "postgres" if compose else "prisma-db"  # the compose database when there is one
+    assert [d["name"] for d in m["databases"]] == [db] and ("lib", db) in deps
+    assert not any("qdrant" in n for n in svc) and not any(d == "qdrant" for _a, d in deps)
+    assert m["source"].endswith("+ code imports")
+    if compose:
+        assert m["aliases"]["localhost:3000"] == "app"  # browser traffic lands on a module that exists
+
+
+def test_a_folder_named_like_the_service_is_not_the_service(tmp_path):
+    """`app/` is Next.js's page router; the compose service called `app` is the repository."""
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "page.tsx").write_text("export default 1")
+    (tmp_path / "Dockerfile").write_text("FROM node:20\n")
+    (tmp_path / "package.json").write_text("{}")
+    (tmp_path / "docker-compose.yml").write_text("services:\n  app:\n    build: .\n")
+    m = codebase.scan(tmp_path)
+    assert [(s["name"], s["path"], s["language"]) for s in m["services"]] == [("app", "", "javascript")]
+
+
 def test_host_normalization_and_resolution():
     aliases = {"localhost:7404": "checkout"}
     assert workspace.host_of("http://127.0.0.1:7404/x?y=1") == "localhost:7404"
