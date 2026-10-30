@@ -91,6 +91,9 @@ class Autopilot:
 
         if repeat:
             kinds = [k for k in repeat.get("fixes", []) if k != "rollback" or change]
+            # Fresh evidence beats memory: a deploy just before the alerts is rolled back whatever fixed it last time.
+            if change and "rollback" not in kinds:
+                kinds.insert(0, "rollback")
         else:
             kinds = ["rollback"] if change else ["open_breaker", "scale_up"]
         if "page_oncall" not in kinds:

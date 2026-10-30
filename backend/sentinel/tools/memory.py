@@ -28,6 +28,8 @@ INTERPRET QUERY (STRING status) FOR GRAPH $graphname SYNTAX v2 {
 def incidents(g: Graph, status: str = "") -> list[dict]:
     found = flat(run(g, INCIDENTS_GSQL, {"status": status}, query_name="sentinel_incidents")["I"])
     for r in found:
+        # A fix is an action that ran. Proposed, rejected or expired actions are part of the record, not the cure.
+        r["fixes"] = sorted({kind for kind, status in (a.split("|", 1) for a in r["actions"]) if status == "executed"})
         r["root_cause_uid"], r["root_cause_service"] = r.pop("rc_uid"), r.pop("rc_service")
         for k in ("root_cause_uid", "root_cause_service", "runbook_uid", "runbook", "runbook_steps", "summary"):
             r[k] = r.get(k) or None

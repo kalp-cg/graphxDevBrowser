@@ -119,3 +119,49 @@ def test_chaos_anywhere_is_found_and_fixed(graph, monkeypatch, service, mode, wi
         execute_action(a["uid"], graph=graph)
     assert unhealthy(graph) == set()
     assert firing(graph) == 0
+
+
+def _transcript(steps):
+    """Chat messages for (tool name, args, result) steps, as the loop records them."""
+    import json as _json
+
+    messages = []
+    for i, (name, args, res) in enumerate(steps):
+        messages.append({"role": "assistant", "tool_calls": [
+            {"id": f"c{i}", "function": {"name": name, "arguments": _json.dumps(args)}}]})
+        messages.append({"role": "tool", "tool_call_id": f"c{i}", "content": _json.dumps(res)})
+    return messages
+
+
+def test_fresh_deploy_is_rolled_back_even_when_memory_says_otherwise():
+    """Memory says paging fixed it last time; a deploy 1 minute before the alerts still gets a rollback."""
+    change = {"version": "v2.4.1", "message": "Reduce pool size", "author": "Priya", "minutes_ago": 1.0,
+              "uid": "dep:inventory:v2.4.1"}
+    steps = [
+        ("get_active_alerts", {}, {"result": [{"service": "checkout"}, {"service": "inventory"}]}),
+        ("find_common_cause", {"services": ["checkout", "inventory"]},
+         {"result": {"candidates": [{"name": "inventory"}]}}),
+        ("recall_similar", {"services": ["checkout", "inventory"]},
+         {"result": {"incidents": [{"id": "INC-1", "root_cause_service": "inventory", "fixes": ["page_oncall"]}]}}),
+        ("recent_changes", {"services": ["inventory"]}, {"result": {"changes": [change]}}),
+    ]
+    reply = asyncio.run(Autopilot().chat(_transcript(steps), []))
+    (call,) = reply.tool_calls
+    assert call.name == "propose_action" and call.args["kind"] == "rollback"
+
+
+def test_only_executed_actions_count_as_fixes(graph):
+    from sentinel.db import link, upsert
+    from sentinel.seed.generator import wipe
+    from sentinel.tools.memory import incidents
+
+    wipe(graph)
+    upsert(graph, "Incident", [{"uid": "inc:INC-9", "id": "INC-9", "status": "resolved"}])
+    upsert(graph, "Action", [{"uid": "act:a", "kind": "page_oncall", "status": "executed"},
+                             {"uid": "act:b", "kind": "rollback", "status": "rejected"},
+                             {"uid": "act:c", "kind": "scale_up", "status": "expired"}])
+    link(graph, "Incident", "RESOLVED_BY", "Action", [("inc:INC-9", u) for u in ("act:a", "act:b", "act:c")])
+    (inc,) = incidents(graph)
+    assert inc["fixes"] == ["page_oncall"]
+    assert sorted(inc["actions"]) == ["page_oncall|executed", "rollback|rejected", "scale_up|expired"]
+    wipe(graph)
