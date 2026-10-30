@@ -116,5 +116,10 @@ jobs:
           npm ci
           SENTINEL_SANDBOX=1 SENTINEL_URL=http://localhost:8200 SENTINEL_ADMIN_TOKEN=sandbox-token \
             npx vitest run tests/unit/sandbox-live.test.ts tests/unit/sentinel-live.test.ts
+      - name: The DevBrowser app end to end (Electron, real pages, real menu shortcuts)
+        run: |
+          (cd DevBrowser && npm run build)
+          cd e2e && npm ci && npx playwright install --with-deps chromium
+          xvfb-run --auto-servernum npx playwright test -c devbrowser.config.ts
       - if: failure()
         run: tail -100 sandbox.log
