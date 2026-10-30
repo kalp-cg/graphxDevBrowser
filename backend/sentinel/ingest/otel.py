@@ -15,15 +15,22 @@ monolith: see monolith.py). Optional resource attributes `service.team`, `servic
 and `telemetry.sdk.language` fill in ownership and metadata.
 """
 import os
+import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
+from .. import baselines
 from ..db import Batch, Graph, link, upsert
 from ..tools.common import now_ms
 
 ERROR_RATE = 0.05  # alert threshold
 DOWN_RATE = 0.5
+# A component is slow when its p90 span duration is this far above what it normally is (see baselines.py): both a multiple of its
+# normal and many "normal wobbles", with enough spans in the batch to mean something.
+SLOW_RATIO = float(os.getenv("OTEL_SLOW_RATIO", "1.25"))
+SLOW_Z = float(os.getenv("OTEL_SLOW_Z", "6"))
+MIN_SPANS = 20
 # Fail fast, recover slowly: a firing component must look healthy for this long before its alert resolves. One
 # clean batch in a noisy stream (a few requests, none failed by chance) is not a recovery.
 RECOVERY_MS = int(os.getenv("OTEL_RECOVERY_MS", "15000"))
@@ -52,6 +59,12 @@ class Component:
     errors: int = 0
     origins: int = 0
     meta: dict[str, str] = field(default_factory=dict)
+    ms: list[float] = field(default_factory=list)
+    slow: bool = False
+
+    @property
+    def p90_ms(self) -> float | None:
+        return statistics.quantiles(self.ms, n=10)[-1] if len(self.ms) >= MIN_SPANS else None
 
     @property
     def error_rate(self) -> float:
@@ -59,7 +72,9 @@ class Component:
 
     @property
     def status(self) -> str:
-        return "down" if self.error_rate >= DOWN_RATE else "degraded" if self.error_rate >= ERROR_RATE else "healthy"
+        if self.error_rate >= DOWN_RATE:
+            return "down"
+        return "degraded" if self.error_rate >= ERROR_RATE or self.slow else "healthy"
 
     @property
     def root_fault(self) -> bool:
@@ -122,6 +137,7 @@ def analyze(spans: list[Span], meta: dict[str, dict[str, str]]) -> dict[str, Any
     for s in spans:
         c = comps.setdefault(s.component, Component(s.component, meta=meta.get(s.component, {})))
         c.spans += 1
+        c.ms.append(s.ms)
         if s.error:
             c.errors += 1
             if (s.trace, s.id) not in erring_children:
@@ -152,6 +168,20 @@ def write(graph: Graph, found: dict[str, Any], kind: str = "service", at: int | 
     at = at or now_ms()
     batch = Batch()
     comps: dict[str, Component] = found["components"]
+    graph_name = getattr(graph, "graphname", "default")
+    normal: dict[str, list[float]] = baselines.load(graph_name) if health else {}
+    if health:
+        learned = False
+        for c in comps.values():
+            p90 = c.p90_ms
+            if p90 is None:
+                continue
+            c.slow = baselines.is_slow(p90, normal.get(c.name, []), SLOW_Z, SLOW_RATIO)
+            if not c.slow and c.status == "healthy":  # normal is learned only from healthy batches, never from a fault
+                normal[c.name] = (normal.get(c.name, []) + [p90])[-baselines.KEEP:]
+                learned = True
+        if learned:
+            baselines.save(graph_name, normal)
     existing = set() if health else {v["v_id"] for v in graph.getVertices("Service", select="name")}
     alert_uids = {f"alert:otel-{c.name}": c for c in comps.values()}
     firing_at = {v["v_id"]: v["attributes"]["at"]
@@ -188,8 +218,11 @@ def write(graph: Graph, found: dict[str, Any], kind: str = "service", at: int | 
     firing = [uid for uid, c in alert_uids.items() if c.status != "healthy"] if health else []
     if health:
         upsert(batch, "Alert", [
-            {"uid": uid, "id": uid.removeprefix("alert:"), "metric": "error_rate", "value": round(c.error_rate, 3),
-             "threshold": ERROR_RATE, "at": at, "status": "firing", "scenario": "otel"}
+            ({"uid": uid, "id": uid.removeprefix("alert:"), "metric": "p90_latency_ms", "value": round(c.p90_ms or 0, 1),
+              "threshold": round(baselines.scale(normal[c.name])[0], 1), "at": at, "status": "firing", "scenario": "otel"}
+             if c.slow and c.error_rate < ERROR_RATE else
+             {"uid": uid, "id": uid.removeprefix("alert:"), "metric": "error_rate", "value": round(c.error_rate, 3),
+              "threshold": ERROR_RATE, "at": at, "status": "firing", "scenario": "otel"})
             for uid, c in alert_uids.items() if uid in firing
         ] + [{"uid": uid, "status": "resolved"} for uid in firing_at
              if uid in alert_uids and uid not in firing and uid not in holding])
@@ -204,10 +237,17 @@ def write(graph: Graph, found: dict[str, Any], kind: str = "service", at: int | 
     }
 
 
-def ingest_traces(graph: Graph, payload: dict, component: str = "service", health: bool = True) -> dict[str, Any]:
+def ingest_traces(graph: Graph, payload: dict, component: str = "service", health: bool = True,
+                  at: int | None = None) -> dict[str, Any]:
     """Parse an OTLP/JSON export and write its topology (and, unless health=False, health and alerts)."""
     spans, meta = parse(payload, component)
-    return write(graph, analyze(spans, meta), kind="module" if component == "module" else "service", health=health)
+    return ingest_spans(graph, spans, meta, component, health, at)
+
+
+def ingest_spans(graph: Graph, spans: list[Span], meta: dict[str, dict[str, str]] | None = None, component: str = "service",
+                 health: bool = True, at: int | None = None) -> dict[str, Any]:
+    """The same for spans already parsed."""
+    return write(graph, analyze(spans, meta or {}), kind="module" if component == "module" else "service", at=at, health=health)
 
 
 def record_change(graph: Graph | Batch, service: str, version: str, at: int, author: str, message: str,

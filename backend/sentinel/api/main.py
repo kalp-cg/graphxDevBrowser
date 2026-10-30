@@ -14,15 +14,19 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from ..agent.autopilot import Autopilot
 from ..agent.llm import available_providers, make_llm
 from ..agent.loop import investigate
 from ..agent.mcp_client import GraphToolbox
 from .. import workspace
 from ..config import settings
 from ..db import get_graph
+from .. import sandbox as sandbox_lab
+from ..impact import changed_files, impact_from_manifest
 from ..ingest import codebase
 from ..ingest.alerts import ingest_alertmanager
 from ..ingest.browser import to_otlp as browser_to_otlp
+from ..ingest.metrics import ingest_metrics
 from ..ingest.otel import ingest_traces, record_change
 from ..seed.generator import refresh_on_call, wipe
 from ..seed.scenarios import (SCENARIOS, inject_chaos, inject_scenario, reset, sandbox_chaos, sandbox_enabled,
@@ -61,11 +65,12 @@ class RunManager:
         self.hub = hub
         self.toolbox: GraphToolbox | None = None
         self.task: asyncio.Task | None = None
+        self.job: asyncio.Task | None = None  # a sandbox test: many runs in a row, so nothing else may start meanwhile
         self.run_id: str | None = None
 
     @property
     def busy(self) -> bool:
-        return self.task is not None and not self.task.done()
+        return (self.task is not None and not self.task.done()) or (self.job is not None and not self.job.done())
 
     async def start(self, question: str, provider: str | None) -> str:
         if self.busy:
@@ -199,14 +204,14 @@ async def start_scenario(name: str) -> dict:
 
 
 @app.post("/api/chaos/{service}")
-async def chaos(service: str, mode: str = "down", deploy: bool = False) -> dict:
+async def chaos(service: str, mode: str = "down", deploy: bool = False, additive: bool = False) -> dict:
     """Break any service (optionally with a bad deploy). Unscripted: the agent must work it out."""
     if runs.busy:
         raise HTTPException(409, "wait for the current investigation to finish")
     try:
-        info = (await asyncio.to_thread(sandbox_chaos, service, mode, deploy)) if sandbox_enabled() else None
+        info = (await asyncio.to_thread(sandbox_chaos, service, mode, deploy, None, 25, additive)) if sandbox_enabled() else None
         if info is None:
-            info = await asyncio.to_thread(inject_chaos, service, mode, deploy)
+            info = await asyncio.to_thread(inject_chaos, service, mode, deploy, None, None, additive)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
     hub.history = []
@@ -240,6 +245,17 @@ async def otlp_traces(payload: dict[str, Any], component: str = "service") -> di
     return out
 
 
+@app.post("/api/metrics")
+async def metrics(payload: dict[str, Any]) -> dict:
+    """Time series per service ({"series": [{"service", "metric", "points": [[t, v], ...]}], "recent_seconds": 300}), e.g. from a
+    Prometheus query_range. A service whose recent window is far outside its own history is marked unhealthy, with an alert."""
+    if not isinstance(payload.get("series"), list):
+        raise HTTPException(422, 'send {"series": [{"service": ..., "metric": ..., "points": [[time, value], ...]}]}')
+    out = await asyncio.to_thread(ingest_metrics, get_graph(), payload)
+    await hub.broadcast({"type": "graph_update", "reason": "metrics"})
+    return out
+
+
 @app.post("/api/browser-traffic")
 async def browser_traffic(records: list[dict[str, Any]]) -> dict:
     """Requests captured by DevBrowser ({pageUrl, url, method, statusCode, mimeType, startTime, endTime}):
@@ -259,8 +275,12 @@ async def apply_workspace(manifest: dict[str, Any]) -> dict:
             raise HTTPException(422, f"manifest.{key} is missing or has the wrong type")
     out = await asyncio.to_thread(codebase.apply, get_graph(), manifest)
     workspace.save({"repo": manifest.get("repo", ""), "source": manifest.get("source", ""),
-                    "scanned_at": now_ms(), "aliases": manifest["aliases"],
-                    "services": [s["name"] for s in manifest["services"]]})
+                    "repo_path": manifest.get("repo_path", ""), "scanned_at": now_ms(), "aliases": manifest["aliases"],
+                    "services": [s["name"] for s in manifest["services"]],
+                    # what "which services does my change affect?" needs, without asking the graph
+                    "manifest": {"services": [{k: s.get(k) for k in ("name", "path", "kind", "tier", "team")}
+                                              for s in manifest["services"]],
+                                 "dependencies": manifest["dependencies"]}})
     await hub.broadcast({"type": "graph_update", "reason": "workspace"})
     return out
 
@@ -292,6 +312,119 @@ async def scan_workspace(body: dict[str, Any]) -> dict:
     out = await apply_workspace(manifest)
     return {**out, "repo": manifest["repo"], "source": manifest["source"], "replaced": replaced,
             "service_names": [s["name"] for s in manifest["services"]]}
+
+
+@app.post("/api/impact")
+async def impact(body: dict[str, Any] | None = None) -> dict:
+    """Which services does this change affect, and what depends on them? For the connected project's uncommitted
+    changes, or the branch since `base`; `files` can be given instead. No graph query: the map is a scan."""
+    body = body or {}
+    ws = workspace.load()
+    if not ws.get("manifest"):
+        raise HTTPException(422, "connect a codebase first: the map comes from scanning your project")
+    files = body.get("files")
+    if not isinstance(files, list):
+        repo = Path(ws.get("repo_path", ""))
+        if not repo.is_dir():
+            raise HTTPException(422, f"{repo} is not on the machine running the SentinelGraph API: pass `files`, or run "
+                                     "`python -m sentinel.ingest impact PATH` where the project is")
+        try:
+            files = await asyncio.to_thread(changed_files, repo, body.get("base"))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    return impact_from_manifest(ws["manifest"], [str(f) for f in files])
+
+
+# --- The sandbox: a 38-service company, and an exam for the agent -----------------------------------------------------
+
+def _idle_exam() -> dict[str, Any]:
+    return {"status": "idle", "provider": None, "total": 0, "done": 0, "current": None, "results": [], "summary": None,
+            "error": None}
+
+
+SANDBOX: dict[str, Any] = {"company": None, "exam": _idle_exam()}
+
+
+async def _exam_job(provider: str | None, n: int, seed: int) -> None:
+    exam = SANDBOX["exam"]
+    graph = get_graph()
+    try:
+        llm = make_llm(provider)
+        if isinstance(llm, Autopilot):
+            llm.delay_s = 0  # no pacing for the benefit of a person watching: this is a test
+        exam["provider"] = llm.name
+        cases = await asyncio.to_thread(sandbox_lab.build_cases, graph, n, seed)
+        exam.update(status="running", total=len(cases))
+        if runs.toolbox is None:
+            runs.toolbox = await GraphToolbox().start()
+        for case in cases:
+            exam["current"] = {"id": case.id, "title": case.title}
+            exam["results"].append(await sandbox_lab.run_case(graph, case, runs.toolbox, llm))
+            exam["done"] += 1
+            await hub.broadcast({"type": "graph_update", "reason": "sandbox"})
+        exam.update(status="done", current=None, summary=sandbox_lab.summarize(exam["results"]))
+    except asyncio.CancelledError:
+        exam.update(status="cancelled", current=None, summary=sandbox_lab.summarize(exam["results"]) if exam["results"] else None)
+        raise
+    except Exception as exc:  # noqa: BLE001 - the exam reports its own failure; it never takes the API down
+        log.exception("sandbox exam failed")
+        exam.update(status="error", current=None, error=str(exc)[:300])
+    finally:
+        try:
+            await asyncio.to_thread(soft_reset, graph)  # leave the company healthy
+        except Exception:  # noqa: BLE001
+            log.exception("could not restore the sandbox after the exam")
+        await hub.broadcast({"type": "graph_update", "reason": "sandbox"})
+
+
+@app.get("/api/sandbox")
+async def sandbox_state() -> dict:
+    loaded = workspace.load().get("repo") == "sandbox"
+    return {"loaded": loaded, "company": SANDBOX["company"] if loaded else None, "exam": SANDBOX["exam"],
+            "providers": await asyncio.to_thread(available_providers), "running": runs.busy}
+
+
+@app.post("/api/sandbox/load")
+async def sandbox_load() -> dict:
+    """Replace the graph with the sandbox company: 38 services, their teams and engineers, history and past incidents."""
+    if runs.busy:
+        raise HTTPException(409, "wait for the current investigation or test to finish")
+    company = await asyncio.to_thread(sandbox_lab.load_company, get_graph())
+    SANDBOX["company"], SANDBOX["exam"] = company, _idle_exam()
+    workspace.save({"repo": "sandbox", "source": "sandbox", "scanned_at": now_ms(), "aliases": {}, "services": []})
+    await hub.broadcast({"type": "graph_update", "reason": "sandbox"})
+    return company
+
+
+class ExamRequest(BaseModel):
+    provider: str | None = None
+    cases: int = 12
+    seed: int = 7
+
+
+@app.post("/api/sandbox/test")
+async def sandbox_test(req: ExamRequest) -> dict:
+    """Start the exam: break things in the sandbox, ask the agent (`provider`) what is wrong, score it against what we broke."""
+    if workspace.load().get("repo") != "sandbox":
+        raise HTTPException(422, "load the sandbox first")
+    if runs.busy:
+        raise HTTPException(409, "an investigation or a test is already running")
+    try:
+        make_llm(req.provider)
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    SANDBOX["exam"] = _idle_exam()
+    SANDBOX["exam"]["status"] = "starting"
+    runs.job = asyncio.create_task(_exam_job(req.provider, max(1, min(req.cases, 12)), req.seed))
+    return {"started": True}
+
+
+@app.delete("/api/sandbox/test")
+async def sandbox_cancel() -> dict:
+    if runs.job and not runs.job.done():
+        runs.job.cancel()
+        return {"cancelled": True}
+    return {"cancelled": False}
 
 
 @app.get("/api/workspace")
