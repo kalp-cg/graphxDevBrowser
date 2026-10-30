@@ -13,6 +13,7 @@ import { useBrowserStore } from './store/useBrowserStore';
 import { FULL_PAGE_VIEWS, useNarrow } from './useNarrow';
 import { startDevServerWatch } from './browser/devServerWatch';
 import { startRunListener } from './store/useRunStore';
+import { startMockSync } from './store/useMockStore';
 import { emulate, goBack, goForward, reload, toggleDevTools, zoom } from './browser/pages';
 import { DEVICES, SEARCH_URL } from '../shared/domain/browser';
 import type { BrowserCommand } from '../shared/ipc-channels';
@@ -25,6 +26,7 @@ const ConsoleView = view(() => import('./components/views/ConsoleView'), 'Consol
 const NetworkView = view(() => import('./components/views/NetworkView'), 'NetworkView');
 const ApiClientView = view(() => import('./components/views/ApiClientView'), 'ApiClientView');
 const SecurityView = view(() => import('./components/views/SecurityView'), 'SecurityView');
+const RecorderView = view(() => import('./components/views/RecorderView'), 'RecorderView');
 const DependencyView = view(() => import('./components/views/DependencyView'), 'DependencyView');
 const AIAssistantView = view(() => import('./components/views/AIAssistantView'), 'AIAssistantView');
 const SettingsView = view(() => import('./components/views/SettingsView'), 'SettingsView');
@@ -69,6 +71,7 @@ const PANELS: Record<string, React.ComponentType> = {
   network: NetworkView,
   apiClient: ApiClientView,
   security: SecurityView,
+  recorder: RecorderView,
   dependencies: DependencyView,
   ai: AIAssistantView,
   settings: SettingsView
@@ -87,6 +90,7 @@ export const App: React.FC = () => {
     let metricsInterval: ReturnType<typeof setInterval> | undefined;
     let stopWatch: (() => void) | undefined;
     let stopRun: (() => void) | undefined;
+    let stopMocks: (() => void) | undefined;
 
     if (window.devBrowserAPI) {
       window.devBrowserAPI.system.getHardwareMetrics().then(app.setHardwareMetrics).catch(console.error);
@@ -106,6 +110,7 @@ export const App: React.FC = () => {
       unsubscribeCommands = window.devBrowserAPI.browser.onCommand(runCommand);
       stopWatch = startDevServerWatch();
       stopRun = startRunListener();
+      stopMocks = startMockSync();
     }
 
     // Shortcuts that are not in the app menu (the menu handles the rest, even while a page has focus).
@@ -130,6 +135,7 @@ export const App: React.FC = () => {
       unsubscribeCommands?.();
       stopWatch?.();
       stopRun?.();
+      stopMocks?.();
       window.removeEventListener('keydown', onKeyDown);
     };
   }, []);

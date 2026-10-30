@@ -12,6 +12,8 @@ export const IPC_CHANNELS = {
   // Network & CDP
   NETWORK_STREAM_TRANSACTION: 'devbrowser:network:streamTransaction',
   NETWORK_CLEAR_TRANSACTIONS: 'devbrowser:network:clearTransactions',
+  NETWORK_MOCK_SET: 'devbrowser:network:setMocks',
+  NETWORK_MOCK_HIT: 'devbrowser:network:mockHit',
 
   // API Client
   API_CLIENT_SEND_REQUEST: 'devbrowser:apiClient:sendRequest',

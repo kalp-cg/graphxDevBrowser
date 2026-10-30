@@ -111,3 +111,37 @@ export async function emulate(id: string, deviceId: string | null, rotated = fal
   if (!res.ok) console.warn('[browser] device emulation failed:', res.error);
   page.view.reload();
 }
+
+/** Run JavaScript in a tab's page (the bug recorder's capture and replay agent). Null while the page cannot take commands. */
+export async function runInPage<T = unknown>(tabId: string, code: string): Promise<T | null> {
+  const page = pages.get(tabId);
+  if (!page?.ready) return null;
+  try {
+    return (await page.view.executeJavaScript(code)) as T;
+  } catch {
+    return null; // a page mid-navigation or mid-teardown
+  }
+}
+
+/** The id of the main-process web contents behind a tab; network captures are tagged `webview-<id>`. */
+export function webContentsIdOf(tabId: string): number | null {
+  const page = pages.get(tabId);
+  if (!page?.ready) return null;
+  try {
+    return page.view.getWebContentsId();
+  } catch {
+    return null;
+  }
+}
+
+/** A small picture of what a tab shows right now, as a data URL; null if the page cannot be captured. */
+export async function screenshotOf(tabId: string, width = 800): Promise<string | null> {
+  const page = pages.get(tabId);
+  if (!page?.ready) return null;
+  try {
+    const image = await page.view.capturePage();
+    return image.resize({ width }).toDataURL();
+  } catch {
+    return null;
+  }
+}

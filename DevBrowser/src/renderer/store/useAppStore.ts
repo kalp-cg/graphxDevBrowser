@@ -20,7 +20,7 @@ import {
 import type { HardwareMetrics } from '../../shared/ipc-channels';
 import { useBrowserStore } from './useBrowserStore';
 
-export type NavigationView = 'browser' | 'run' | 'console' | 'network' | 'apiClient' | 'security' | 'dependencies' | 'ai' | 'settings';
+export type NavigationView = 'browser' | 'run' | 'console' | 'network' | 'apiClient' | 'security' | 'recorder' | 'dependencies' | 'ai' | 'settings';
 export type ThemeMode = 'dark' | 'light';
 
 export interface ToastMessage {

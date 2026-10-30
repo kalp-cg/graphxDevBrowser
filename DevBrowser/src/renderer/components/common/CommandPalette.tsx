@@ -13,10 +13,13 @@ import {
   Sun, 
   Moon, 
   HelpCircle,
-  Flame
+  Flame,
+  CircleDot
 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { useBrowserStore } from '../../store/useBrowserStore';
+import { useRecorderStore } from '../../store/useRecorderStore';
+import { startRecording, stopRecording } from '../../browser/recorder';
 
 interface CommandItem {
   id: string;
@@ -59,6 +62,25 @@ export const CommandPalette: React.FC = () => {
       subtitle: 'Give the page the full window',
       icon: <Globe size={16} />,
       action: () => setActiveView('browser')
+    },
+    {
+      id: 'nav-recorder',
+      category: 'Navigation',
+      title: 'Open Bug Recorder',
+      subtitle: 'Record a bug, export it, or replay a teammate\'s recording',
+      icon: <CircleDot size={16} />,
+      action: () => setActiveView('recorder')
+    },
+    {
+      id: 'act-record',
+      category: 'Actions',
+      title: useRecorderStore.getState().status === 'recording' ? 'Stop Recording' : 'Record This Tab',
+      subtitle: 'Capture clicks, requests and errors as a shareable file',
+      icon: <CircleDot size={16} />,
+      action: () => {
+        if (useRecorderStore.getState().status === 'recording') void stopRecording();
+        else { setActiveView('recorder'); void startRecording(); }
+      }
     },
     {
       id: 'nav-network',

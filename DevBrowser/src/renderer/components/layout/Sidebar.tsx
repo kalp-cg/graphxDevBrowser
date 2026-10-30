@@ -1,7 +1,8 @@
 import React from 'react';
-import { Bot, Network, Play, Send, Settings, Share2, ShieldAlert, Terminal } from 'lucide-react';
+import { Bot, CircleDot, Network, Play, Send, Settings, Share2, ShieldAlert, Terminal } from 'lucide-react';
 import { useRunStore } from '../../store/useRunStore';
 import { useConsoleStore } from '../../store/useConsoleStore';
+import { useRecorderStore } from '../../store/useRecorderStore';
 import { useBrowserStore } from '../../store/useBrowserStore';
 import { useAppStore, type NavigationView } from '../../store/useAppStore';
 import { forSite } from '../../../shared/domain/browser';
@@ -21,6 +22,7 @@ export const Sidebar: React.FC = () => {
   const sentinel = useAppStore(s => s.sentinelStatus);
   const running = useAppStore(s => s.sentinelRun.phase === 'running');
 
+  const recording = useRecorderStore(s => s.status === 'recording');
   const runStatus = useRunStore(s => s.status);
   const activeTab = useBrowserStore(s => s.activeId);
   const pageErrors = useConsoleStore(s => s.entries.filter(e => e.level === 'error' && e.tabId === activeTab).reduce((n, e) => n + e.count, 0));
@@ -35,6 +37,7 @@ export const Sidebar: React.FC = () => {
     { id: 'apiClient', label: 'API Client', icon: <Send size={18} /> },
     { id: 'security', label: 'Security', icon: <ShieldAlert size={18} />,
       badge: findings ? String(findings) : undefined, tone: 'danger' },
+    { id: 'recorder', label: 'Bug Recorder', icon: <CircleDot size={18} />, badge: recording ? '' : undefined, tone: 'danger' },
     { id: 'ai', label: 'AI Assistant', icon: <Bot size={18} /> }
   ];
   const sentinelItem: (typeof items)[number] = { id: 'dependencies', label: 'Dependencies (SentinelGraph)',

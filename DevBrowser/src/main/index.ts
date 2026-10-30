@@ -10,6 +10,8 @@ import { OllamaClient } from './ai/ollama-client';
 import { CredentialVault } from './crypto/vault';
 import { PassiveSecurityAuditor } from './security/auditor';
 import { CDPNetworkInterceptor } from './network/cdp-interceptor';
+import { MockEngine } from './network/mock-engine';
+import { MOCK_HEADER, MockStateSchema } from '../shared/domain/mock';
 import { SentinelGraphClient } from './integrations/sentinel-client';
 import { toTrafficRecord } from '../shared/domain/sentinel';
 import { IPC_CHANNELS, type BrowserCommand, type EmulatedDevice } from '../shared/ipc-channels';
@@ -54,6 +56,7 @@ let ollamaClient: OllamaClient | null = null;
 let credentialVault: CredentialVault | null = null;
 let securityAuditor: PassiveSecurityAuditor | null = null;
 let cdpInterceptor: CDPNetworkInterceptor | null = null;
+const mockEngine = new MockEngine();
 let sentinelClient: SentinelGraphClient | null = null;
 
 async function createWindow(): Promise<BrowserWindow> {
@@ -105,6 +108,7 @@ async function createWindow(): Promise<BrowserWindow> {
   // Only pages are intercepted: the app's own UI is not a page the developer is debugging.
   mainWindow.webContents.on('did-attach-webview', (_event, guest) => {
     cdpInterceptor?.attachToWebContents(guest, `webview-${guest.id}`);
+    mockEngine.attach(guest);
     setupGuest(guest, sendCommand);
   });
 
@@ -155,7 +159,9 @@ app.whenReady().then(async () => {
   const client = sentinelClient;
   cdpInterceptor = new CDPNetworkInterceptor(securityAuditor, (tx, pageUrl) => {
     // Only pages browsed in a <webview> describe the user's system; the app's own UI does not.
-    if (mainWindow && pageUrl !== mainWindow.webContents.getURL()) {
+    // A response a mock rule made up says nothing about the real system.
+    const mocked = Object.keys(tx.responseHeaders ?? {}).some(k => k.toLowerCase() === MOCK_HEADER);
+    if (!mocked && mainWindow && pageUrl !== mainWindow.webContents.getURL()) {
       const rec = toTrafficRecord(tx, pageUrl);
       if (rec) client.record(rec);
     }
@@ -186,6 +192,12 @@ app.whenReady().then(async () => {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
       }
     });
+  ipcMain.handle(IPC_CHANNELS.NETWORK_MOCK_SET, (event, raw: unknown) => {
+    if (event.sender !== mainWindow?.webContents) return { ok: false, active: 0, error: 'not the app window' };
+    const parsed = MockStateSchema.safeParse(raw);
+    if (!parsed.success) return { ok: false, active: 0, error: parsed.error.issues[0]?.message ?? 'invalid rules' };
+    return { ok: true, active: mockEngine.setState(parsed.data) };
+  });
   registerIpcHandlers(partitionManager, ollamaClient, credentialVault, securityAuditor, sentinelClient);
 
   await createWindow();

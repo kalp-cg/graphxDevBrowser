@@ -113,8 +113,9 @@ export class CDPNetworkInterceptor {
 
       this.pendingRequests.set(p.requestId, pending);
 
-      // Run passive security audit on HTTP response
-      this.securityAuditor.evaluateResponse({
+      // Run passive security audit on HTTP response (not on one a mock rule made up: its headers describe nothing real)
+      const mocked = Object.keys(p.response.headers ?? {}).some(k => k.toLowerCase() === 'x-devbrowser-mock');
+      if (!mocked) this.securityAuditor.evaluateResponse({
         url: p.response.url,
         pageUrl: pending.pageUrl,
         method: pending.method || 'GET',

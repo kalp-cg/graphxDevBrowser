@@ -4,6 +4,32 @@ All notable changes. Versions follow [semantic versioning](https://semver.org/).
 
 ## Unreleased
 
+### Mocks: answer requests yourself, from the Network panel
+- **Right-click any request** in the Network list: *Mock this response…* (opens an editor filled with the captured response), *Return 500*,
+  *Return 404*, *Delay 5 seconds*, *Drop the connection*. The page gets the made-up answer, a slow one, or a dead connection, without
+  touching the backend. Mocked rows are tagged MOCK; dropped ones are listed as Failed.
+- **Mocks pane** (a button in the Network toolbar): a master switch, every rule with its own switch and hit count, an editor (method,
+  address with `*` wildcards, status, headers, body, delay), and what rules did recently. The first matching rule wins; new ones go first.
+- **No backend needed:** make rules from a **HAR file** (export "HAR + bodies") or from a **bug recording**, and the page runs on the
+  recorded responses.
+- Safe by construction: nothing is intercepted until a rule is on (no rule, no paused request); only requests matching a rule's address
+  are ever paused and every one is resolved, whatever goes wrong; cross-origin calls get the CORS answers they need; mocking is switched
+  off at every launch (rules are kept) and the status bar shows ◆ MOCKS while it is on. A made-up response is not audited by Security and
+  is not reported to SentinelGraph as real traffic.
+- Added: a small main-process module and one IPC call; the existing capture, throttling and device emulation are untouched.
+
+### Bug Recorder: record a bug, send one file, replay it
+- **Record this tab.** The Bug Recorder panel (and the command palette, and the red REC marker in the status bar) records one tab: clicks,
+  typing, Enter/Escape, scrolling, page navigations, every request and response, console errors and warnings, uncaught errors and
+  unhandled promise rejections, and the page itself (a screenshot and a self-contained DOM snapshot at the start, at each error, and at the end).
+- **One shareable file** (`.devrec.json`). Credentials never go in: password-like fields are never captured, `Authorization`/cookie headers,
+  token-like query values, JWTs, bearer values, well-known key formats and secret-named JSON fields are removed, and the file says how many.
+- **Replay.** A teammate opens the file and replays it in a new tab against their own copy of the app (the address is editable, for a
+  different port). DevBrowser re-does the clicks and typing with a highlight on each element, then says **reproduced**, **partly**, or **not
+  reproduced** by comparing the errors and failing requests it saw with the recording's.
+- "What went wrong" on every recording: the first error or failing request and the action right before it.
+- Additive: the main process and the preload bridge are untouched; the existing panels behave as before. 21 unit tests and a real-app end-to-end test.
+
 ### Run, Console, and what is running on your machine
 - **Run panel.** Choose your project folder; DevBrowser suggests what to run from what is in it (npm/pnpm/yarn/bun scripts, Django, Go,
   Rust, Gradle, Maven, Docker Compose, .NET, Swift, Python, Make). It shows the output, opens the page in a tab the moment the server

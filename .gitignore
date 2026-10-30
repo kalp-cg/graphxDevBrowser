@@ -32,7 +32,7 @@ dump.rdb
 DevBrowser/dist/
 DevBrowser/dist-electron/
 DevBrowser/build/
-DevBrowser/release/
+# DevBrowser/release/
 DevBrowser/coverage/
 DevBrowser/*.lcov
 DevBrowser/.nyc_output/

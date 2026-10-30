@@ -89,11 +89,11 @@ export function timingPhases(tx: Pick<NetworkTransaction, 'timing' | 'startTime'
   return { phases, total: Math.max(total, bodyStart) };
 }
 
-const SECRET_HEADER = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|x-csrf-token)$/i;
+export const SECRET_HEADER = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|x-csrf-token)$/i;
 const SECRET_PARAM = /token|secret|password|passwd|api[-_]?key|apikey|auth|session|signature|credential/i;
 const REDACTED = '[redacted]';
 
-function redactUrl(url: string): string {
+export function redactUrl(url: string): string {
   try {
     const u = new URL(url);
     for (const k of [...u.searchParams.keys()]) if (SECRET_PARAM.test(k)) u.searchParams.set(k, REDACTED);

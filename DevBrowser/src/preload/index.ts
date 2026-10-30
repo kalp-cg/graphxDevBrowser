@@ -4,6 +4,7 @@ import type { DevBrowserAPI } from './api';
 import type { RunEvent } from '../shared/domain/run';
 import type { AIDebugContext } from '../shared/domain/ai';
 import type { NetworkTransaction } from '../shared/domain/network';
+import type { MockHit, MockState } from '../shared/domain/mock';
 import type { InvestigationEvidence } from '../shared/domain/sentinel';
 import type { ApiSendRequest } from '../shared/domain/api-client';
 
@@ -23,6 +24,12 @@ const devBrowserAPI: DevBrowserAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.TABS_LIST)
   },
   network: {
+    setMocks: (state: MockState) => ipcRenderer.invoke(IPC_CHANNELS.NETWORK_MOCK_SET, state),
+    onMockHit: (callback: (hit: MockHit) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, hit: MockHit) => callback(hit);
+      ipcRenderer.on(IPC_CHANNELS.NETWORK_MOCK_HIT, listener);
+      return () => { ipcRenderer.removeListener(IPC_CHANNELS.NETWORK_MOCK_HIT, listener); };
+    },
     onStreamTransaction: (callback: (tx: NetworkTransaction) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, tx: NetworkTransaction) => callback(tx);
       ipcRenderer.on(IPC_CHANNELS.NETWORK_STREAM_TRANSACTION, listener);

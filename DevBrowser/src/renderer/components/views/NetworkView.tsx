@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Network, 
   Search, 
@@ -17,6 +17,10 @@ import { timingPhases, toHar } from '../../../shared/domain/network';
 import { THROTTLES } from '../../../shared/domain/browser';
 import { useBrowserStore } from '../../store/useBrowserStore';
 import { setThrottle } from '../../browser/pages';
+import { MocksPane } from './MocksPane';
+import { activeCount, useMockStore } from '../../store/useMockStore';
+import { MOCK_HEADER, QUICK_LABEL, ruleFromTransaction, type QuickAction } from '../../../shared/domain/mock';
+import type { NetworkTransaction } from '../../../shared/domain/network';
 
 export const NetworkView: React.FC = () => {
   const allTransactions = useAppStore(s => s.transactions);
@@ -50,6 +54,24 @@ export const NetworkView: React.FC = () => {
     URL.revokeObjectURL(url);
     addToast({ type: 'success', title: `Exported ${filteredTransactions.length} request${filteredTransactions.length === 1 ? '' : 's'}`,
       message: bodies ? 'HAR with bodies. Credentials in headers and query strings were removed; bodies were not scrubbed.' : 'HAR without bodies. Credentials were removed.' });
+  };
+
+  const mockActive = useMockStore(activeCount);
+  const mocksOpen = useMockStore(s => s.paneOpen);
+  const setMocksOpen = useMockStore(s => s.setPane);
+  const [menu, setMenu] = useState<{ x: number; y: number; tx: NetworkTransaction } | null>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', close);
+    return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', close); };
+  }, [menu]);
+  const quick = (tx: NetworkTransaction, action: QuickAction) => {
+    const rule = ruleFromTransaction(tx, action);
+    if (action === 'mock') { useMockStore.getState().edit(rule); return; }
+    useMockStore.getState().add(rule);
+    addToast({ type: 'success', title: 'Mock rule added', message: `${rule.name}. Mocking is on: reload the page to see it.` });
   };
 
   const [activeDetailTab, setActiveDetailTab] = useState<'headers' | 'payload' | 'response' | 'timing'>('headers');
@@ -167,6 +189,10 @@ export const NetworkView: React.FC = () => {
             onChange={e => void setThrottle(activeTab?.id ?? '', e.target.value)} disabled={!activeTab}>
             {THROTTLES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
           </select>
+          <button className={`btn${mocksOpen ? ' primary' : ''}`} style={{ height: 24, fontSize: 11, color: !mocksOpen && mockActive ? 'var(--warn)' : undefined }} aria-pressed={mocksOpen} aria-label="Mocks"
+            title="Answer requests with a made-up response, a delay or a dropped connection" onClick={() => setMocksOpen(!mocksOpen)}>
+            Mocks{mockActive ? ` (${mockActive})` : ''}
+          </button>
           <button className="btn" style={{ height: 24, fontSize: 11 }} disabled={!filteredTransactions.length} onClick={() => exportHar(false)}
             title="Save what is listed as a HAR file. Credentials are removed.">HAR</button>
           <button className="btn" style={{ height: 24, fontSize: 11 }} disabled={!filteredTransactions.length} onClick={() => exportHar(true)}
@@ -194,8 +220,10 @@ export const NetworkView: React.FC = () => {
         </div>
       </div>
 
+      {mocksOpen && <MocksPane />}
+
       {/* Main Network Transactions Table */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: 'auto', display: mocksOpen ? 'none' : undefined }}>
         {filteredTransactions.length === 0 ? (
           <EmptyState
             icon={<Network size={32} />}
@@ -233,6 +261,7 @@ export const NetworkView: React.FC = () => {
                   <tr
                     key={tx.id}
                     onClick={() => setSelectedTransactionId(tx.id)}
+                    onContextMenu={e => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, tx }); }}
                     style={{
                       borderBottom: '1px solid var(--border-subtle)',
                       background: isSelected ? 'var(--bg-active)' : 'transparent',
@@ -252,7 +281,8 @@ export const NetworkView: React.FC = () => {
                       fontWeight: 600,
                       color: getStatusColor(tx.statusCode)
                     }}>
-                      {tx.statusCode ? `${tx.statusCode} ${tx.statusText || ''}` : 'Pending'}
+                      {tx.statusCode ? `${tx.statusCode} ${tx.statusText || ''}` : tx.error ? 'Failed' : 'Pending'}
+                      {Object.keys(tx.responseHeaders ?? {}).some(k => k.toLowerCase() === MOCK_HEADER) || tx.id.startsWith('mock-drop-') ? <span className="tag warn" style={{ marginLeft: 6, height: 15, fontSize: 9 }} title="Answered by a DevBrowser mock rule, not by the server">MOCK</span> : null}
                     </td>
                     <td style={{
                       padding: '6px 10px',
@@ -285,12 +315,12 @@ export const NetworkView: React.FC = () => {
       </div>
 
       {/* Resizable Divider Handle */}
-      {selectedTx && (
+      {selectedTx && !mocksOpen && (
         <ResizableHandle onResize={handleResize} />
       )}
 
       {/* Selected Transaction Inspector Detail Panel */}
-      {selectedTx && (
+      {selectedTx && !mocksOpen && (
         <div style={{
           height: `${resizablePanelHeight}px`,
           background: 'var(--bg-secondary)',
@@ -484,6 +514,20 @@ export const NetworkView: React.FC = () => {
               );
             })()}
           </div>
+        </div>
+      )}
+
+      {menu && (
+        <div role="menu" aria-label="Request actions" onClick={e => e.stopPropagation()}
+          style={{ position: 'fixed', left: Math.min(menu.x, window.innerWidth - 220), top: Math.min(menu.y, window.innerHeight - 190), zIndex: 200, minWidth: 200, padding: 4,
+            background: 'var(--bg-secondary)', border: '1px solid var(--border-medium)', borderRadius: 8, boxShadow: '0 10px 30px rgba(0,0,0,.4)' }}>
+          <div style={{ padding: '4px 10px 6px', fontSize: 10.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {menu.tx.method} {menu.tx.url.replace(/^https?:\/\//, '')}
+          </div>
+          {(['mock', '500', '404', 'delay', 'drop'] as const).map(a => (
+            <button key={a} role="menuitem" className="btn" style={{ display: 'block', width: '100%', textAlign: 'left', border: 0, background: 'transparent', height: 28 }}
+              onClick={() => { quick(menu.tx, a); setMenu(null); }}>{QUICK_LABEL[a]}</button>
+          ))}
         </div>
       )}
     </div>

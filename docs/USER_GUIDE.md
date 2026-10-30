@@ -55,6 +55,18 @@ opened in the API client to edit and replay it.
 - **Throttling** (Fast 3G, Slow 3G, Offline) slows or cuts the page you are on, like DevTools. Reload the page to see the effect; it applies to that tab until you change it.
 - **HAR** saves the listed requests in the standard HAR format (every developer tool reads it). Credentials are removed: authorization and cookie headers, and token-like query values. **HAR + bodies** also includes request and response bodies, which can hold secrets nothing can find for you, so it asks first.
 
+#### Mocks: fake a slow, broken or empty backend
+
+Right-click a request in the list:
+
+- **Mock this response…** opens an editor with the captured response; change the body or status and save.
+- **Return 500** / **Return 404** answer with that error. **Delay 5 seconds** lets the real server answer, late. **Drop the connection** makes the call fail.
+
+Reload the page to see it. Rules live in the **Mocks** pane (the button in the toolbar): turn individual rules or all mocking on and off,
+edit them, see how often each answered. Addresses can use `*`; a rule for `/api/products` also answers `/api/products?limit=2`. The first
+matching rule wins. You can also make rules **From HAR** (a "HAR + bodies" export) or **From a bug recording**, and run the page with no
+backend at all. Mocking is off after every launch; while it is on, the status bar shows ◆ MOCKS.
+
 ### Security
 
 A passive audit of what the page's own traffic reveals: missing security headers, permissive policies, version
@@ -81,6 +93,21 @@ sent; add a `Cookie` header if a request needs one.
 A server that is not there is explained (*connection refused*, *no response within 30 s*, *could not resolve the host*),
 never shown as a made-up response. What it does not do (yet): collections and folders, request chaining or scripting,
 OAuth helpers, file uploads, importing from Postman or OpenAPI.
+
+### Bug Recorder
+
+Turn "it breaks when I click Pay" into a file a teammate can replay.
+
+1. Load the page where the bug happens and open **Bug Recorder** in the tool rail (or the command palette: *Record This Tab*).
+2. Press **Record this tab**, do what triggers the bug, press **Stop**. A red **REC** marks the status bar meanwhile.
+3. The recording opens with **What went wrong** (the first error or failing request, and what you did right before it), and a
+   timeline: your actions, every request with its response, console errors, and snapshots of the page you can look at as it was.
+4. **Export file** saves one `.devrec.json`. Passwords, tokens, cookies and keys are removed before anything is written; the panel says how many.
+5. A teammate presses **Open file**, picks it, and presses **Replay**. A new tab opens on their copy of the app (change **Replay against**
+   if it runs on another port) and repeats your actions. The result says **Reproduced**, **Partly reproduced** or **Not reproduced**,
+   and lists which problems did or did not happen.
+
+Replay needs the app to be running; it does not mock the network. Hidden fields (passwords) are never recorded, so replay skips them.
 
 ### AI assistant
 

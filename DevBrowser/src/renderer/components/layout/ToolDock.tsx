@@ -7,6 +7,7 @@ const TITLES: Partial<Record<NavigationView, string>> = {
   network: 'Network',
   apiClient: 'API Client',
   security: 'Security',
+  recorder: 'Bug Recorder',
   dependencies: 'SentinelGraph',
   ai: 'AI Assistant',
   settings: 'Settings'

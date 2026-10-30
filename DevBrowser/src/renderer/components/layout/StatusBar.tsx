@@ -2,6 +2,9 @@ import React from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { useBrowserStore } from '../../store/useBrowserStore';
+import { useRecorderStore } from '../../store/useRecorderStore';
+import { stopRecording } from '../../browser/recorder';
+import { activeCount, useMockStore } from '../../store/useMockStore';
 import { forSite } from '../../../shared/domain/browser';
 
 const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
@@ -23,6 +26,8 @@ export const StatusBar: React.FC = () => {
   const theme = useAppStore(s => s.theme);
   const toggleTheme = useAppStore(s => s.toggleTheme);
   const setActiveView = useAppStore(s => s.setActiveView);
+  const recording = useRecorderStore(s => s.status === 'recording');
+  const mocks = useMockStore(activeCount);
 
   const item: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' };
 
@@ -34,6 +39,19 @@ export const StatusBar: React.FC = () => {
           {tab?.error ? `Failed: ${tab.error.description}` : tab?.loading ? `Loading ${tab.url}` : tab?.url === 'about:blank' ? '' : tab?.url}
         </span>
       </span>
+      {mocks > 0 && (
+        <button onClick={() => { useMockStore.getState().setPane(true); setActiveView('network'); }} title="Mock rules are answering for the pages you browse. Click to manage them."
+          aria-label={`Mocking is on: ${mocks} rule${mocks === 1 ? '' : 's'}`}
+          style={{ ...item, border: 0, background: 'none', color: 'var(--warn)', font: 'inherit', fontWeight: 700, cursor: 'pointer' }}>
+          ◆ MOCKS {mocks}
+        </button>
+      )}
+      {recording && (
+        <button onClick={() => void stopRecording()} title="Stop recording and save it" aria-label="Recording: click to stop"
+          style={{ ...item, border: 0, background: 'none', color: 'var(--danger)', font: 'inherit', fontWeight: 700, cursor: 'pointer' }}>
+          ● REC
+        </button>
+      )}
       <span style={item}>{requests} requests captured</span>
       <button onClick={() => setActiveView('settings')} title={sentinel === 'connected' ? sentinelUrl : 'Connect in Settings'}
         style={{ ...item, border: 0, background: 'none', color: 'inherit', font: 'inherit', cursor: 'pointer' }}>

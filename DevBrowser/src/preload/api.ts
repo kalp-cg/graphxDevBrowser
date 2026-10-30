@@ -6,6 +6,7 @@ import type { ShredResult } from '../shared/domain/privacy';
 import type { ApiSendRequest, ApiSendResult } from '../shared/domain/api-client';
 import type { AIDebugContext, AICodeDiff } from '../shared/domain/ai';
 import type { NetworkTransaction } from '../shared/domain/network';
+import type { MockHit, MockState } from '../shared/domain/mock';
 import type {
   InvestigationEvidence,
   ChaosKind,
@@ -34,6 +35,9 @@ export interface DevBrowserAPI {
     getPartitions: () => Promise<ProfilePartition[]>;
   };
   network: {
+    /** The mock rules in force. Rules answer a page's requests with a made-up response, a delay, or a dropped connection. */
+    setMocks: (state: MockState) => Promise<{ ok: boolean; active: number; error?: string }>;
+    onMockHit: (callback: (hit: MockHit) => void) => () => void;
     onStreamTransaction: (callback: (tx: NetworkTransaction) => void) => () => void;
   };
   ai: {
