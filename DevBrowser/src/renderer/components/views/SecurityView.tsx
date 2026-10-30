@@ -43,7 +43,7 @@ export const SecurityView: React.FC = () => {
       runs: [{
         tool: {
           driver: {
-            name: 'Dev Browser Passive Security Auditor',
+            name: 'DevBrowser Passive Security Auditor',
             version: '1.0.0',
             rules: findings.map(f => ({
               id: f.ruleId,

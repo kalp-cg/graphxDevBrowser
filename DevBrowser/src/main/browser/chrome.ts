@@ -42,7 +42,7 @@ export function installAppMenu(send: CommandSink, toggleAppDevTools: () => void)
         cmd('Toggle Tool Panel', 'toggle-panel', 'CmdOrCtrl+\\'),
         { type: 'separator' },
         cmd('Developer Tools', 'page-devtools', mac ? 'Alt+Command+I' : 'Ctrl+Shift+I'),
-        { label: 'Dev Browser Developer Tools', accelerator: mac ? 'Alt+Shift+Command+I' : 'Ctrl+Alt+Shift+I',
+        { label: 'DevBrowser Developer Tools', accelerator: mac ? 'Alt+Shift+Command+I' : 'Ctrl+Alt+Shift+I',
           click: toggleAppDevTools },
         { type: 'separator' },
         { role: 'togglefullscreen' }

@@ -289,6 +289,13 @@ def test_sandbox_chaos_breaks_the_real_shop_and_waits_for_the_alerts(api, graph,
         scenarios.sandbox_chaos("no-such-service", "down", False, graph)
 
 
+def test_scan_maps_a_host_folder_to_where_the_container_mounts_it(api, monkeypatch):
+    monkeypatch.setenv("SENTINEL_PROJECTS_HOST", "/Users/dev/code")
+    monkeypatch.setenv("SENTINEL_PROJECTS_MOUNT", str(SHOP.parent))
+    assert api.post("/api/workspace/scan", json={"path": "/Users/dev/code/shop"}).json()["repo"] == "shop"
+    assert api.post("/api/workspace/scan", json={"path": "/Users/dev/other"}).status_code == 422  # outside the mount
+
+
 def test_passive_traffic_never_changes_health(api, graph):
     api.post("/api/workspace", json=codebase.scan(SHOP))
     bad = [{"pageUrl": "http://localhost:7400/", "url": "http://localhost:7401/api/checkout", "method": "POST",

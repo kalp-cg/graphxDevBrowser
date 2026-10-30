@@ -79,12 +79,13 @@ export const NetworkView: React.FC = () => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
+        flexWrap: 'wrap',
         padding: '8px 12px',
         borderBottom: '1px solid var(--border-subtle)',
         background: 'var(--bg-secondary)',
         gap: '8px'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px', flex: 1, minWidth: 0 }}>
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -170,7 +171,7 @@ export const NetworkView: React.FC = () => {
           <EmptyState
             icon={<Network size={32} />}
             title={history ? 'No requests in the history' : siteOf(currentUrl) ? 'No requests for this site yet' : 'No page open'}
-            description={siteOf(currentUrl) || history ? "Dev Browser's CDP interceptor is monitoring traffic. Navigate in the browser or trigger an API call to inspect traffic. Use History for earlier sites."
+            description={siteOf(currentUrl) || history ? "DevBrowser's CDP interceptor is monitoring traffic. Navigate in the browser or trigger an API call to inspect traffic. Use History for earlier sites."
               : 'Open a page to see its network traffic. Use History for sites you visited earlier.'}
             actionLabel="Reset Filters"
             onAction={() => { setNetworkSearchQuery(''); setNetworkFilter('all'); }}

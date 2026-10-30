@@ -1,13 +1,23 @@
-# Full stack: docker compose up --build   ->   UI http://localhost:3001 · API http://localhost:8100
-# The graph lives in TigerGraph Cloud (TG_HOST / TG_SECRET / TG_GRAPH from .env); nothing graph-related runs locally.
+# SentinelGraph on your own machine, for DevBrowser:
+#
+#   PROJECTS_DIR=/absolute/path/to/your/code docker compose up --build backend
+#
+# The API listens on 127.0.0.1:8100 only. It has no login, so never publish that port. Point DevBrowser at
+# http://127.0.0.1:8100, then "Connect codebase" and pick a folder inside PROJECTS_DIR.
+# `frontend` is the optional web dashboard (http://127.0.0.1:3001).
 services:
   backend:
     build: ./backend
     environment:
-      TG_HOST: ${TG_HOST}
+      # Empty TG_HOST = the embedded graph (kept in the `sentinel_data` volume). Set TG_HOST/TG_SECRET for TigerGraph Cloud.
+      TG_HOST: ${TG_HOST:-}
       TG_SECRET: ${TG_SECRET:-}
       TG_TOKEN: ${TG_TOKEN:-}
       TG_GRAPH: ${TG_GRAPH:-Sentinel}
+      SEED_DEMO: ${SEED_DEMO:-0}
+      # The folder DevBrowser picks lives on your machine; the API reads it where it is mounted.
+      SENTINEL_PROJECTS_HOST: ${PROJECTS_DIR:-}
+      SENTINEL_PROJECTS_MOUNT: /projects
       # ollama (on the host) | gemini | openai | autopilot (no LLM needed)
       LLM_PROVIDER: ${LLM_PROVIDER:-autopilot}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
@@ -17,18 +27,26 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       PAGER_WEBHOOK_URL: ${PAGER_WEBHOOK_URL:-}
-      CORS_ORIGINS: http://localhost:3001
+      CORS_ORIGINS: http://localhost:3001,http://127.0.0.1:3001
+    volumes:
+      - sentinel_data:/data
+      - ${PROJECTS_DIR:-./demo-repos}:/projects:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8100:8100"
+      - "127.0.0.1:8100:8100"
+    restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8100}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8100}
     depends_on:
       - backend
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
+    restart: unless-stopped
+
+volumes:
+  sentinel_data:

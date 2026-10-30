@@ -144,12 +144,22 @@ export function toBlastRadius(rootNodeId: string, res: SentinelBlastRadius, node
   };
 }
 
+/** An address without its query string or fragment: topology needs the host and path, and a query can carry tokens. */
+export function withoutQuery(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname;
+  } catch {
+    return url.split(/[?#]/)[0] ?? '';
+  }
+}
+
 /** A captured transaction as a traffic record, or null if it can't be one (no page or no response yet). */
 export function toTrafficRecord(tx: NetworkTransaction, pageUrl: string): BrowserTrafficRecord | null {
   if (!pageUrl.startsWith('http') || !tx.url.startsWith('http')) return null;
   return {
-    pageUrl,
-    url: tx.url,
+    pageUrl: withoutQuery(pageUrl),
+    url: withoutQuery(tx.url),
     method: tx.method,
     statusCode: tx.statusCode ?? 0,
     mimeType: tx.mimeType,
@@ -285,7 +295,7 @@ export interface RunSummary {
 export function toEvidence(tx: NetworkTransaction, pageUrl: string): InvestigationEvidence | null {
   const status = tx.statusCode ?? 0;
   if (!tx.url.startsWith('http') || (status > 0 && status < 500)) return null;
-  return { url: tx.url, method: tx.method, status_code: status, page_url: pageUrl.startsWith('http') ? pageUrl : '' };
+  return { url: withoutQuery(tx.url), method: tx.method, status_code: status, page_url: pageUrl.startsWith('http') ? withoutQuery(pageUrl) : '' };
 }
 
 /** Tools that describe the whole system rather than this incident; their nodes are not part of the failure path. */

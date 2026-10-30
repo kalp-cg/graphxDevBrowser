@@ -12,8 +12,6 @@ import { useAppStore } from '../../store/useAppStore';
 import { Badge } from '../common/Badge';
 
 export const SettingsView: React.FC = () => {
-  const telemetryEnabled = useAppStore(s => s.telemetryEnabled);
-  const historyAutoPurgeDays = useAppStore(s => s.historyAutoPurgeDays);
   const ollamaHost = useAppStore(s => s.ollamaHost);
   const selectedAiModel = useAppStore(s => s.selectedAiModel);
   const setSetting = useAppStore(s => s.setSetting);
@@ -105,35 +103,8 @@ export const SettingsView: React.FC = () => {
                   Privacy Controls & Data Retention
                 </h2>
                 <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                  Dev Browser is strictly local-first. We collect zero analytics and route zero traffic through remote proxy servers.
+                  DevBrowser collects no analytics and has no servers of its own. Pages load straight from their sites; captured traffic goes only to a SentinelGraph server you choose to connect.
                 </p>
-              </div>
-
-              {/* Zero Telemetry Toggle */}
-              <div style={{
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border-medium)',
-                borderRadius: '8px',
-                padding: '16px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}>
-                <div>
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                    Anonymous Diagnostic Telemetry
-                  </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    Strict Default: Disabled. When disabled, zero network packets leave the machine.
-                  </div>
-                </div>
-
-                <input
-                  type="checkbox"
-                  checked={telemetryEnabled}
-                  onChange={e => setSetting('telemetryEnabled', e.target.checked)}
-                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                />
               </div>
 
               {/* Keychain SafeStorage Status */}
@@ -150,46 +121,23 @@ export const SettingsView: React.FC = () => {
                   <Key size={18} color="var(--accent-emerald)" />
                   <div>
                     <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                      Hardware-Backed Keychain Encryption
+                      Encrypted credential storage
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                      Leverages macOS Keychain via Electron <code>safeStorage</code> API. Secrets are encrypted at rest.
+                      Saved secrets are encrypted with your system's secure storage (Keychain on macOS, DPAPI on Windows, libsecret on Linux) through Electron <code>safeStorage</code>.
                     </div>
                   </div>
                 </div>
 
-                <Badge label="Active (macOS Keychain)" variant="success" />
+                <Badge label="System-encrypted" variant="success" />
               </div>
 
-              {/* Auto Purge Slider */}
-              <div style={{
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border-medium)',
-                borderRadius: '8px',
-                padding: '16px'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                    Automatic History & Network Purge Retention
-                  </span>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--accent-cyan)' }}>
-                    {historyAutoPurgeDays} Days
-                  </span>
-                </div>
-
-                <input
-                  type="range"
-                  min={7}
-                  max={90}
-                  step={7}
-                  value={historyAutoPurgeDays}
-                  onChange={e => setSetting('historyAutoPurgeDays', parseInt(e.target.value))}
-                  style={{ width: '100%', cursor: 'pointer' }}
-                />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                  <span>7 Days (Minimal Storage)</span>
-                  <span>30 Days (Recommended)</span>
-                  <span>90 Days (Extended Audit)</span>
+              <div style={{ border: '1px solid var(--border-medium)', borderRadius: '8px', padding: '16px', display: 'flex',
+                flexDirection: 'column', gap: '6px' }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>What is kept, and for how long</div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  History keeps your last 300 pages. Captured network traffic and security findings are held in memory
+                  and disappear when you quit. Use <strong>Browsing data</strong> to clear everything now.
                 </div>
               </div>
             </div>
@@ -203,7 +151,7 @@ export const SettingsView: React.FC = () => {
                   Local AI Inference Engine (Ollama)
                 </h2>
                 <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                  Inference executes locally on your MacBook Air M4 using unified memory and Metal GPU acceleration.
+                  Inference runs on this machine through Ollama, on the GPU where one is available. Nothing is sent to a cloud model.
                 </p>
               </div>
 
@@ -294,12 +242,12 @@ export const SettingsView: React.FC = () => {
                     fontSize: '13px'
                   }}
                 >
-                  <option value="qwen2.5-coder:7b">qwen2.5-coder:7b (Recommended · 4.7 GB VRAM · ~38 tok/s on M4)</option>
+                  <option value="qwen2.5-coder:7b">qwen2.5-coder:7b (recommended, about 4.7 GB)</option>
                   <option value="llama3.2:3b">llama3.2:3b (Lightweight · 2.0 GB VRAM · Low Battery Mode)</option>
                 </select>
 
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                  Configured with dynamic eviction (<code>keep_alive: "5m"</code>). Automatically unloads weights from unified RAM after 5 minutes of inactivity to keep your Mac fast.
+                  Configured with dynamic eviction (<code>keep_alive: "5m"</code>). The model is unloaded from memory after 5 minutes of inactivity.
                 </div>
               </div>
             </div>
@@ -420,7 +368,7 @@ export const SettingsView: React.FC = () => {
                   Browsing data
                 </h2>
                 <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                  What Dev Browser keeps on this machine, and a way to clear it.
+                  What DevBrowser keeps on this machine, and a way to clear it.
                 </p>
               </div>
 

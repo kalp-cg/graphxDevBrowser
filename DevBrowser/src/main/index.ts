@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, webContents } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, webContents } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,8 +14,22 @@ import { SentinelGraphClient } from './integrations/sentinel-client';
 import { toTrafficRecord } from '../shared/domain/sentinel';
 import { IPC_CHANNELS, type BrowserCommand, type EmulatedDevice } from '../shared/ipc-channels';
 import { emulateDevice, installAppMenu, setupGuest } from './browser/chrome';
+import { log } from './logger';
+import { loadWindowState, trackWindowState } from './window-state';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// The name in the menu bar, the About panel and the dock, also when run from source.
+app.setName('DevBrowser');
+app.setAboutPanelOptions({
+  applicationName: 'DevBrowser',
+  applicationVersion: app.getVersion(),
+  copyright: 'Copyright © 2026 SentinelGraph. MIT licence.',
+  website: 'https://github.com/MahirPatel2005/graphxDevBrowser'
+});
+
+process.on('uncaughtException', err => log('error', 'uncaught exception', err));
+process.on('unhandledRejection', reason => log('error', 'unhandled rejection', reason));
 
 // A separate profile directory (tests, or a second instance next to your everyday one).
 if (process.env.DEVBROWSER_USER_DATA) app.setPath('userData', process.env.DEVBROWSER_USER_DATA);
@@ -43,12 +57,15 @@ let cdpInterceptor: CDPNetworkInterceptor | null = null;
 let sentinelClient: SentinelGraphClient | null = null;
 
 async function createWindow(): Promise<BrowserWindow> {
+  const state = loadWindowState({ width: 1440, height: 960 });
   mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 960,
+    width: state.width,
+    height: state.height,
+    ...(state.x !== undefined && state.y !== undefined ? { x: state.x, y: state.y } : {}),
     minWidth: 640,
-    minHeight: 700,
-    title: 'Dev Browser',
+    minHeight: 500,
+    title: 'DevBrowser',
+    icon: path.join(__dirname, '../build/icon.png'),
     titleBarStyle: 'hiddenInset',
     backgroundColor: '#0f172a', // Slate 900
     webPreferences: {
@@ -59,6 +76,21 @@ async function createWindow(): Promise<BrowserWindow> {
       webviewTag: true
     }
   });
+
+  if (state.maximized) mainWindow.maximize();
+  trackWindowState(mainWindow);
+
+  // The app's own window never navigates: links in it open in the system browser, nothing replaces the interface.
+  mainWindow.webContents.on('will-navigate', event => event.preventDefault());
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https:\/\//i.test(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    log('error', `interface process gone: ${details.reason}`);
+    if (details.reason !== 'clean-exit') mainWindow?.reload(); // recover without losing the window
+  });
+  mainWindow.on('unresponsive', () => log('warn', 'interface is not responding'));
 
   // Pages run in <webview>s with no access to Node or the app's preload, whatever the markup asks for.
   mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
@@ -95,8 +127,8 @@ function sendCommand(command: BrowserCommand, arg?: string): void {
 }
 
 app.whenReady().then(async () => {
-  const envConfig = validateEnvironment();
-  console.log(`[DevBrowser] Launching with environment: ${envConfig.NODE_ENV}`);
+  const envConfig = validateEnvironment({ ...process.env, NODE_ENV: process.env.NODE_ENV ?? (app.isPackaged ? 'production' : undefined) });
+  log('info', `DevBrowser ${app.getVersion()} starting (${envConfig.NODE_ENV}, ${process.platform} ${process.arch}, electron ${process.versions.electron})`);
 
   partitionManager = new PartitionManager();
   ollamaClient = new OllamaClient(envConfig.OLLAMA_HOST, envConfig.DEFAULT_AI_MODEL);
@@ -154,7 +186,9 @@ app.on('activate', () => {
   }
 });
 
+app.on('child-process-gone', (_event, details) => log('error', `${details.type} process gone: ${details.reason}`));
+
 app.on('before-quit', () => {
-  console.log('[DevBrowser] Shutting down gracefully...');
+  log('info', 'shutting down');
   sentinelClient?.dispose();
 });

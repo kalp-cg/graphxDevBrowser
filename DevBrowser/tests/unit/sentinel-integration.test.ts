@@ -211,6 +211,17 @@ describe('Investigate this failure', () => {
     expect(toEvidence(tx(200), 'http://localhost:7400/')).toBeNull();
   });
 
+  it('never sends query strings or fragments, which can carry tokens', () => {
+    const tx = { id: 't', url: 'http://localhost:7401/api/cart?token=secret&u=1#frag', method: 'GET', statusCode: 502,
+      mimeType: 'application/json', startTime: 1, endTime: 2, requestHeaders: {} } as unknown as NetworkTransaction;
+    const rec = toTrafficRecord(tx, 'http://localhost:7400/checkout?session=abc')!;
+    expect(rec.url).toBe('http://localhost:7401/api/cart');
+    expect(rec.pageUrl).toBe('http://localhost:7400/checkout');
+    expect(JSON.stringify(rec)).not.toMatch(/secret|abc|frag/);
+    expect(toEvidence(tx, 'http://localhost:7400/checkout?session=abc')).toMatchObject({
+      url: 'http://localhost:7401/api/cart', page_url: 'http://localhost:7400/checkout' });
+  });
+
   it('lights up the incident on the graph, not the ranking of the most critical services', () => {
     const tool = (name: string, nodes: string[], edges: string[] = []) =>
       ({ type: 'tool_result', run_id: 'r2', name, node_uids: nodes, edge_uids: edges });

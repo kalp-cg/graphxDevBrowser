@@ -1,6 +1,9 @@
 import type { DevBrowserAPI } from '../preload/api';
 
 declare global {
+  /** The version in package.json, injected at build time. */
+  const __APP_VERSION__: string;
+
   interface Window {
     devBrowserAPI?: DevBrowserAPI;
   }

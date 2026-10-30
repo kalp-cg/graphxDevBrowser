@@ -120,7 +120,7 @@ export class OllamaClient {
     const sanitizedStack = context.stackTrace ? this.sanitizeTokens(context.stackTrace) : '';
 
     const systemPrompt = 
-      'You are Dev Browser Local AI, an expert debugging assistant running on Apple Silicon. ' +
+      'You are DevBrowser Local AI, an expert debugging assistant running locally. ' +
       'Diagnose the developer error concisely, state the root cause, and provide a unified git diff patch if code needs fixing.';
 
     const userPrompt = 

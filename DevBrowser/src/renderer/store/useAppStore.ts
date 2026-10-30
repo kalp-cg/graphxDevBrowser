@@ -306,7 +306,7 @@ export const useAppStore = create<AppState>((set, get) => {
               orderId: 'ord_' + Math.random().toString(36).substring(2, 9),
               status: 'processed_successfully',
               timestamp: new Date().toISOString(),
-              summary: 'Request executed in Dev Browser sandbox'
+              summary: 'Request executed in DevBrowser sandbox'
             }
           }
         });
@@ -603,7 +603,7 @@ export const useAppStore = create<AppState>((set, get) => {
       {
         id: 'msg-1',
         sender: 'assistant',
-        text: 'Dev Browser Local AI assistant is ready. Inference executes 100% on-device over Apple Silicon unified memory via Ollama. No code or tokens leave your Mac.',
+        text: 'The local assistant is ready. It runs on this machine through Ollama: what you type and what you select stays here.',
         timestamp: Date.now() - 60000
       }
     ],

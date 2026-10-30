@@ -1,3 +1,5 @@
+# WARNING: the SentinelGraph API has no authentication. This blueprint publishes it on the internet, which is
+# acceptable only for the public read-only-style demo of seeded sample data. Do not point it at a graph with real data.
 # Render Blueprint: New > Blueprint > pick this repo. Secrets (sync: false) are asked for at creation.
 services:
   - type: web
@@ -9,6 +11,8 @@ services:
     region: singapore          # pick the Render region closest to the TigerGraph Cloud instance
     healthCheckPath: /api/health
     envVars:
+      - key: SEED_DEMO
+        value: "1"
       - key: TG_HOST
         sync: false           # https://<id>.i.tgcloud.io
       - key: TG_SECRET

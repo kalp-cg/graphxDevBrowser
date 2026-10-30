@@ -1,7 +1,7 @@
 {
-  "name": "dev-browser",
-  "version": "0.1.0",
-  "description": "Commercial Desktop Browser for Software Developers",
+  "name": "devbrowser",
+  "version": "1.0.0",
+  "description": "The browser for people who build and run software: inspect any page, see how your services connect, and find the cause of a failure.",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
@@ -13,16 +13,13 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "start": "electron ."
-  },
-  "dependencies": {
-    "d3-force": "^3.0.0",
-    "lucide-react": "^0.453.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-force-graph-2d": "^1.29.2",
-    "zod": "^3.23.8",
-    "zustand": "^5.0.16"
+    "start": "electron .",
+    "icons": "node scripts/build-icons.mjs",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:linux": "npm run build && electron-builder --linux"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
@@ -31,14 +28,116 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
+    "d3-force": "^3.0.0",
     "electron": "^33.2.0",
+    "electron-builder": "^26.18.0",
     "eslint": "^9.13.0",
     "globals": "^15.11.0",
+    "lucide-react": "^0.453.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-force-graph-2d": "^1.29.2",
+    "sharp": "^0.35.5",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.11.0",
     "vite": "^5.4.10",
     "vite-plugin-electron": "^0.28.8",
     "vite-plugin-electron-renderer": "^0.14.5",
-    "vitest": "^2.1.4"
+    "vitest": "^2.1.4",
+    "zod": "^3.23.8",
+    "zustand": "^5.0.16"
+  },
+  "author": {
+    "name": "SentinelGraph",
+    "email": "kalp.patel.codinggita@gmail.com",
+    "url": "https://github.com/MahirPatel2005/graphxDevBrowser"
+  },
+  "homepage": "https://github.com/MahirPatel2005/graphxDevBrowser",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MahirPatel2005/graphxDevBrowser.git"
+  },
+  "license": "MIT",
+  "private": true,
+  "build": {
+    "appId": "dev.sentinelgraph.devbrowser",
+    "productName": "DevBrowser",
+    "copyright": "Copyright \u00a9 2026 SentinelGraph",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "build/icon.png",
+      "package.json"
+    ],
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "identity": null,
+      "hardenedRuntime": false,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
+    },
+    "dmg": {
+      "title": "${productName} ${version}",
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Development",
+      "maintainer": "SentinelGraph <kalp.patel.codinggita@gmail.com>",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
+    }
   }
 }

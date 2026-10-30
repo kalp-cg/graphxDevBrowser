@@ -45,7 +45,7 @@ export const StatusBar: React.FC = () => {
         Local AI {ollama.ok ? ollama.model : 'offline'}
       </span>
       {metrics && (
-        <span style={item} title="Memory used by every Dev Browser process (UI and pages)">
+        <span style={item} title="Memory used by every DevBrowser process (UI and pages)">
           {gb(metrics.appMemoryUsageBytes)} used
         </span>
       )}

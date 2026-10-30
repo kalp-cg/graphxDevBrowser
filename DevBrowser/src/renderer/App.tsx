@@ -1,16 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { Suspense, lazy, useEffect } from 'react';
 import { Sidebar } from './components/layout/Sidebar';
 import { StatusBar } from './components/layout/StatusBar';
 import { ToolDock } from './components/layout/ToolDock';
 import { TabStrip } from './components/browser/TabStrip';
 import { Toolbar } from './components/browser/Toolbar';
 import { BrowserArea } from './components/browser/BrowserArea';
-import { NetworkView } from './components/views/NetworkView';
-import { ApiClientView } from './components/views/ApiClientView';
-import { SecurityView } from './components/views/SecurityView';
-import { DependencyView } from './components/views/DependencyView';
-import { AIAssistantView } from './components/views/AIAssistantView';
-import { SettingsView } from './components/views/SettingsView';
 import { CommandPalette } from './components/common/CommandPalette';
 import { ShortcutsModal } from './components/common/ShortcutsModal';
 import { ToastContainer } from './components/common/ToastContainer';
@@ -20,6 +14,16 @@ import { FULL_PAGE_VIEWS, useNarrow } from './useNarrow';
 import { emulate, goBack, goForward, reload, toggleDevTools, zoom } from './browser/pages';
 import { DEVICES, SEARCH_URL } from '../shared/domain/browser';
 import type { BrowserCommand } from '../shared/ipc-channels';
+
+// Each tool is its own chunk, loaded when first opened (the graph library alone is a third of the bundle).
+const view = (load: () => Promise<Record<string, React.ComponentType>>, name: string) =>
+  lazy(() => load().then(m => ({ default: m[name]! })));
+const NetworkView = view(() => import('./components/views/NetworkView'), 'NetworkView');
+const ApiClientView = view(() => import('./components/views/ApiClientView'), 'ApiClientView');
+const SecurityView = view(() => import('./components/views/SecurityView'), 'SecurityView');
+const DependencyView = view(() => import('./components/views/DependencyView'), 'DependencyView');
+const AIAssistantView = view(() => import('./components/views/AIAssistantView'), 'AIAssistantView');
+const SettingsView = view(() => import('./components/views/SettingsView'), 'SettingsView');
 
 /** Menu shortcuts, page popups and context-menu actions, all routed here from the main process. */
 function runCommand(command: BrowserCommand, arg?: string): void {
@@ -54,7 +58,7 @@ function runCommand(command: BrowserCommand, arg?: string): void {
   }
 }
 
-const PANELS: Record<string, React.FC> = {
+const PANELS: Record<string, React.ComponentType> = {
   network: NetworkView,
   apiClient: ApiClientView,
   security: SecurityView,
@@ -126,7 +130,13 @@ export const App: React.FC = () => {
         <Sidebar />
         <main style={{ flex: 1, minWidth: 0, display: 'flex' }}>
           <BrowserArea hidden={!!Panel && (panelMaximized || narrow || FULL_PAGE_VIEWS.has(activeView))} />
-          {Panel && <ToolDock><Panel /></ToolDock>}
+          {Panel && (
+            <ToolDock>
+              <Suspense fallback={<div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: 12 }}>Loading…</div>}>
+                <Panel />
+              </Suspense>
+            </ToolDock>
+          )}
         </main>
       </div>
       <StatusBar />

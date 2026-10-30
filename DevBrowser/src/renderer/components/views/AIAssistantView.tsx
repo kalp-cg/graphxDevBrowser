@@ -73,7 +73,7 @@ export const AIAssistantView: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--text-muted)' }}>
             <ShieldCheck size={12} color="var(--accent-emerald)" />
-            <span>100% On-Device (Apple Silicon M4) · Zero Cloud Leakage</span>
+            <span>On-device · nothing leaves this machine</span>
           </div>
 
           <button
@@ -188,7 +188,7 @@ export const AIAssistantView: React.FC = () => {
         {isAiGenerating && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '12px' }}>
             <Loader2 size={14} className="animate-spin" color="var(--accent)" />
-            <span>Local model reasoning over local unified memory...</span>
+            <span>Thinking…</span>
           </div>
         )}
 

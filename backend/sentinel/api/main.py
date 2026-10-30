@@ -269,7 +269,11 @@ async def apply_workspace(manifest: dict[str, Any]) -> dict:
 async def scan_workspace(body: dict[str, Any]) -> dict:
     """Scan a repository that lives on the API's own machine ({"path": "/abs/path/to/repo"}), the case when
     DevBrowser and the API run side by side. A remote API cannot see your disk: use `--push` from the CLI."""
-    path = Path(str(body.get("path", ""))).expanduser()
+    raw = str(body.get("path", ""))
+    host, mount = os.getenv("SENTINEL_PROJECTS_HOST", "").rstrip("/"), os.getenv("SENTINEL_PROJECTS_MOUNT", "").rstrip("/")
+    if host and mount and (raw == host or raw.startswith(host + "/")):
+        raw = mount + raw[len(host):]  # the API runs in a container: the same folder, where it is mounted
+    path = Path(raw).expanduser()
     if not path.is_dir():
         raise HTTPException(422, f"{path} is not a directory on the machine running the SentinelGraph API; "
                                  "scan from your machine with: python -m sentinel.ingest codebase PATH --push URL")

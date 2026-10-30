@@ -10,6 +10,7 @@ const SHOP = "localhost:7400";
 const API = process.env.SENTINEL_SANDBOX_API ?? "http://localhost:8200";
 const CONTROL = "http://localhost:7499/__control";
 const SHOTS = process.env.DEVBROWSER_SHOTS;
+const PACKAGED = process.env.DEVBROWSER_PACKAGED;
 const electronPath = createRequire(path.join(APP, "package.json"))("electron") as unknown as string;
 const userData = mkdtempSync(path.join(os.tmpdir(), "devbrowser-e2e-"));
 
@@ -19,8 +20,10 @@ let page: Page;
 async function launch() {
   // Linux CI containers have no SUID sandbox helper for Electron.
   const args = process.platform === "linux" ? [APP, "--no-sandbox"] : [APP];
-  app = await electron.launch({ executablePath: electronPath, args, cwd: APP,
-    env: { ...process.env, DEVBROWSER_USER_DATA: userData, NODE_ENV: "production" } });
+  const env = { ...process.env, DEVBROWSER_USER_DATA: userData, NODE_ENV: "production" };
+  // DEVBROWSER_PACKAGED=/path/to/DevBrowser(.app/Contents/MacOS/DevBrowser|.exe) runs the suite against an installed build.
+  app = PACKAGED ? await electron.launch({ executablePath: PACKAGED, args: [], env })
+    : await electron.launch({ executablePath: electronPath, args, cwd: APP, env });
   page = await app.firstWindow();
   await page.setViewportSize({ width: 1440, height: 900 }).catch(() => undefined);
   await expect(page.getByRole("tablist", { name: "Tabs" })).toBeVisible();
@@ -61,7 +64,7 @@ test.beforeAll(launch);
 test.afterAll(async () => app?.close());
 
 test("opens on a new tab page", async () => {
-  await expect(page.getByRole("heading", { name: "New tab" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "DevBrowser" })).toBeVisible();
   await expect(tabs()).toHaveCount(1);
   await shot("01-new-tab");
 });
@@ -90,7 +93,7 @@ test("a page keeps its state across tab switches and tool panels (no reload)", a
   await inPage("window.__marker = 42");
   await menu("new-tab");
   await expect(tabs()).toHaveCount(2);
-  await expect(page.getByRole("heading", { name: "New tab" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "DevBrowser" })).toBeVisible();
   await menu("select-tab-1");
   await page.getByRole("button", { name: "Network", exact: true }).click();
   await expect(page.getByRole("region", { name: "Network panel" })).toBeVisible();
