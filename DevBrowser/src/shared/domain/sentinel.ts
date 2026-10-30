@@ -19,6 +19,17 @@ export interface SentinelNode {
   team?: string | null;
   pagerank?: number;
   betweenness?: number;
+  // Context nodes (deploys, commits, alerts, incidents, actions) carry a few more fields for tooltips.
+  at?: number;
+  change_summary?: string;
+  message?: string;
+  metric?: string;
+  value?: number;
+  threshold?: number;
+  title?: string;
+  reason?: string;
+  version?: string;
+  ref?: string;
 }
 
 export interface SentinelLink {
@@ -224,6 +235,8 @@ export interface SentinelRunEvent {
   seconds?: number;
   actions?: SentinelAction[];
   action?: SentinelAction;
+  node_uids?: string[];
+  edge_uids?: string[];
 }
 
 export interface SentinelRun {
@@ -240,6 +253,8 @@ export interface RunSummary {
   report: string | null;
   seconds: number | null;
   proposed: SentinelAction[];
+  /** What the agent's queries touched (for the graph): everything so far, and the latest step alone. */
+  path: { nodes: string[]; edges: string[]; currentNodes: string[]; currentEdges: string[] };
 }
 
 /** A failed transaction as evidence, or null if it isn't a server-side failure (a 4xx is the caller's mistake). */
@@ -250,17 +265,22 @@ export function toEvidence(tx: NetworkTransaction, pageUrl: string): Investigati
 }
 
 export function summarizeRun(run: SentinelRun | null): RunSummary {
-  const empty: RunSummary = { phase: 'idle', steps: [], rootCause: null, report: null, seconds: null, proposed: [] };
+  const path = { nodes: [] as string[], edges: [] as string[], currentNodes: [] as string[], currentEdges: [] as string[] };
+  const empty: RunSummary = { phase: 'idle', steps: [], rootCause: null, report: null, seconds: null, proposed: [], path };
   if (!run || !run.run_id) return empty;
-  const steps = run.events
-    .filter(e => e.type === 'tool_result')
-    .map(e => ({ name: e.name ?? '', summary: e.summary ?? '', error: Boolean(e.error) }));
+  const results = run.events.filter(e => e.type === 'tool_result');
+  const steps = results.map(e => ({ name: e.name ?? '', summary: e.summary ?? '', error: Boolean(e.error) }));
+  const last = results[results.length - 1];
+  path.nodes = [...new Set(results.flatMap(e => e.node_uids ?? []))];
+  path.edges = [...new Set(results.flatMap(e => e.edge_uids ?? []))];
+  path.currentNodes = last?.node_uids ?? [];
+  path.currentEdges = last?.edge_uids ?? [];
   const proposed = run.events.filter(e => e.type === 'action_proposed' && e.action).map(e => e.action as SentinelAction);
-  const last = run.events[run.events.length - 1];
-  if (last?.type === 'error') return { ...empty, phase: 'failed', steps, report: last.message ?? 'Investigation failed' };
-  if (last?.type === 'final') {
-    return { phase: 'done', steps, rootCause: last.root_cause ?? null, report: last.report ?? null,
-      seconds: last.seconds ?? null, proposed };
+  const end = run.events[run.events.length - 1];
+  if (end?.type === 'error') return { ...empty, phase: 'failed', steps, path, report: end.message ?? 'Investigation failed' };
+  if (end?.type === 'final') {
+    return { phase: 'done', steps, rootCause: end.root_cause ?? null, report: end.report ?? null,
+      seconds: end.seconds ?? null, proposed, path: { ...path, currentNodes: [], currentEdges: [] } };
   }
-  return { ...empty, phase: 'running', steps, proposed };
+  return { ...empty, phase: 'running', steps, proposed, path };
 }

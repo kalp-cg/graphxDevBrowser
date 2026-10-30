@@ -1,8 +1,8 @@
-import { ipcMain } from 'electron';
+import { app, ipcMain, session } from 'electron';
 import os from 'node:os';
 import { IPC_CHANNELS, type HardwareMetrics } from '../../shared/ipc-channels';
 import type { PartitionManager } from '../session/partition-manager';
-import type { BrowserTab } from '../../shared/domain/browser';
+import { PROFILES, type BrowserTab } from '../../shared/domain/browser';
 import type { SecurityFinding } from '../../shared/domain/security';
 import type { ShredResult } from '../../shared/domain/privacy';
 import type { AIDebugContext } from '../../shared/domain/ai';
@@ -11,6 +11,8 @@ import { CredentialVault } from '../crypto/vault';
 import { PassiveSecurityAuditor } from '../security/auditor';
 import type { SentinelGraphClient } from '../integrations/sentinel-client';
 import type { InvestigationEvidence } from '../../shared/domain/sentinel';
+
+const BROWSING_PARTITIONS = PROFILES.map(p => p.key);
 
 let handlersRegistered = false;
 
@@ -30,7 +32,8 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.SYSTEM_GET_HARDWARE_METRICS, async (): Promise<HardwareMetrics> => {
     const totalMem = os.totalmem();
     const freeMem = os.freemem();
-    const processMem = process.memoryUsage().rss;
+    // Every process of the app: main, UI renderer, GPU and each page. workingSetSize is in KB.
+    const processMem = app.getAppMetrics().reduce((sum, m) => sum + m.memory.workingSetSize * 1024, 0);
 
     return {
       totalUnifiedMemoryBytes: totalMem,
@@ -289,20 +292,18 @@ export function registerIpcHandlers(
     securityAuditor.clearFindings();
   });
 
-  // 6. Nuclear Shred action
+  // 6. Clear browsing data: every profile's cookies, storage and cache, plus saved credentials and findings.
   ipcMain.handle(IPC_CHANNELS.PRIVACY_TRIGGER_NUCLEAR_SHRED, async (): Promise<ShredResult> => {
+    const details: string[] = [];
+    for (const key of BROWSING_PARTITIONS) {
+      const ses = session.fromPartition(key);
+      await ses.clearStorageData();
+      await ses.clearCache();
+      details.push(`${key}: cookies, storage and cache cleared`);
+    }
     credentialVault.clearAllSecrets();
     securityAuditor.clearFindings();
-
-    return {
-      success: true,
-      purgedItemsCount: 3,
-      timestamp: Date.now(),
-      details: [
-        'Session storage partitions purged',
-        'In-memory network logs wiped',
-        'Keychain credentials verified clean'
-      ]
-    };
+    details.push('Saved credentials cleared', 'Security findings cleared');
+    return { success: true, purgedItemsCount: BROWSING_PARTITIONS.length, timestamp: Date.now(), details };
   });
 }

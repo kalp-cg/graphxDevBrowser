@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain, webContents } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,8 +12,13 @@ import { PassiveSecurityAuditor } from './security/auditor';
 import { CDPNetworkInterceptor } from './network/cdp-interceptor';
 import { SentinelGraphClient } from './integrations/sentinel-client';
 import { toTrafficRecord } from '../shared/domain/sentinel';
+import { IPC_CHANNELS, type BrowserCommand, type EmulatedDevice } from '../shared/ipc-channels';
+import { emulateDevice, installAppMenu, setupGuest } from './browser/chrome';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// A separate profile directory (tests, or a second instance next to your everyday one).
+if (process.env.DEVBROWSER_USER_DATA) app.setPath('userData', process.env.DEVBROWSER_USER_DATA);
 
 // Ensure single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -55,14 +60,20 @@ async function createWindow(): Promise<BrowserWindow> {
     }
   });
 
-  // Attach CDP interceptor to track network frames & passive security
-  if (cdpInterceptor) {
-    cdpInterceptor.attachToWebContents(mainWindow.webContents, 'tab-init-1');
-  }
+  // Pages run in <webview>s with no access to Node or the app's preload, whatever the markup asks for.
+  mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    delete webPreferences.preload;
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    if (params.src && !/^(https?:|about:|data:|view-source:)/i.test(params.src)) event.preventDefault();
+  });
 
-  // Every page opened in a <webview> gets the same interception; its API calls also feed SentinelGraph.
+  // Every page gets network interception (its API calls also feed SentinelGraph) and browser behaviour.
+  // Only pages are intercepted: the app's own UI is not a page the developer is debugging.
   mainWindow.webContents.on('did-attach-webview', (_event, guest) => {
     cdpInterceptor?.attachToWebContents(guest, `webview-${guest.id}`);
+    setupGuest(guest, sendCommand);
   });
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
@@ -77,6 +88,10 @@ async function createWindow(): Promise<BrowserWindow> {
   });
 
   return mainWindow;
+}
+
+function sendCommand(command: BrowserCommand, arg?: string): void {
+  mainWindow?.webContents.send(IPC_CHANNELS.BROWSER_COMMAND, command, arg);
 }
 
 app.whenReady().then(async () => {
@@ -109,6 +124,19 @@ app.whenReady().then(async () => {
   });
 
   configureSecurityDirectives();
+  installAppMenu(sendCommand, () => mainWindow?.webContents.toggleDevTools());
+  ipcMain.handle(IPC_CHANNELS.BROWSER_EMULATE,
+    async (_event, args: { webContentsId: number; device: EmulatedDevice | null }) => {
+      const guest = webContents.fromId(args.webContentsId);
+      // Only pages hosted by this window can be emulated.
+      if (!guest || guest.hostWebContents !== mainWindow?.webContents) return { ok: false, error: 'not a page of this window' };
+      try {
+        await emulateDevice(guest, args.device);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    });
   registerIpcHandlers(partitionManager, ollamaClient, credentialVault, securityAuditor, sentinelClient);
 
   await createWindow();

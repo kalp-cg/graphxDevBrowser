@@ -32,6 +32,9 @@ export const IPC_CHANNELS = {
   SENTINEL_BLAST_RADIUS: 'devbrowser:sentinel:blastRadius',
   SENTINEL_START_INVESTIGATION: 'devbrowser:sentinel:startInvestigation',
   SENTINEL_RESTORE: 'devbrowser:sentinel:restore',
+  // Browser chrome: menu shortcuts and page events from the main process, device emulation into it
+  BROWSER_COMMAND: 'devbrowser:browser:command',
+  BROWSER_EMULATE: 'devbrowser:browser:emulate',
   SENTINEL_RESOLVE: 'devbrowser:sentinel:resolve',
   SENTINEL_CURRENT_RUN: 'devbrowser:sentinel:currentRun',
   SENTINEL_APPROVE_ACTION: 'devbrowser:sentinel:approveAction',
@@ -49,4 +52,20 @@ export interface HardwareMetrics {
   appMemoryUsageBytes: number;
   cpuArchitecture: string;
   isAppleSilicon: boolean;
+}
+
+/** A browser action routed from the app menu, a page's context menu or a popup to the renderer. */
+export type BrowserCommand =
+  | 'new-tab' | 'close-tab' | 'reopen-tab' | 'open-tab' | 'search' | 'select-tab' | 'next-tab' | 'prev-tab'
+  | 'focus-address' | 'reload' | 'hard-reload' | 'back' | 'forward' | 'find'
+  | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'toggle-device' | 'toggle-split' | 'toggle-panel'
+  | 'page-devtools' | 'command-palette';
+
+/** The device a page is emulated as (CSS pixels). */
+export interface EmulatedDevice {
+  width: number;
+  height: number;
+  scale: number;
+  mobile: boolean;
+  userAgent?: string;
 }

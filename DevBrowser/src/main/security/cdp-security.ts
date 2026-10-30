@@ -9,7 +9,7 @@ export function configureSecurityDirectives(): void {
         responseHeaders: {
           ...details.responseHeaders,
           'Content-Security-Policy': [
-            "default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' http://127.0.0.1:11434 http://localhost:9000 https:; font-src 'self' data:;"
+            "default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' http://127.0.0.1:11434 http://localhost:9000 https:; font-src 'self' data:;"
           ]
         }
       });

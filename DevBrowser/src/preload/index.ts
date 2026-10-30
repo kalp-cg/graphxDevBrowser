@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC_CHANNELS } from '../shared/ipc-channels';
+import { IPC_CHANNELS, type BrowserCommand, type EmulatedDevice } from '../shared/ipc-channels';
 import type { DevBrowserAPI } from './api';
 import type { AIDebugContext } from '../shared/domain/ai';
 import type { NetworkTransaction } from '../shared/domain/network';
@@ -57,6 +57,17 @@ const devBrowserAPI: DevBrowserAPI = {
   },
   privacy: {
     triggerNuclearShred: () => ipcRenderer.invoke(IPC_CHANNELS.PRIVACY_TRIGGER_NUCLEAR_SHRED)
+  },
+  browser: {
+    onCommand: (callback: (command: BrowserCommand, arg?: string) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, command: BrowserCommand, arg?: string) => callback(command, arg);
+      ipcRenderer.on(IPC_CHANNELS.BROWSER_COMMAND, listener);
+      return () => {
+        ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_COMMAND, listener);
+      };
+    },
+    emulate: (webContentsId: number, device: EmulatedDevice | null) =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_EMULATE, { webContentsId, device })
   }
 };
 

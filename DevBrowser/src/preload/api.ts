@@ -1,4 +1,4 @@
-import type { HardwareMetrics } from '../shared/ipc-channels';
+import type { BrowserCommand, EmulatedDevice, HardwareMetrics } from '../shared/ipc-channels';
 import type { BrowserTab, ProfilePartition } from '../shared/domain/browser';
 import type { SecurityFinding } from '../shared/domain/security';
 import type { ShredResult } from '../shared/domain/privacy';
@@ -51,5 +51,9 @@ export interface DevBrowserAPI {
   };
   privacy: {
     triggerNuclearShred: () => Promise<ShredResult>;
+  };
+  browser: {
+    onCommand: (callback: (command: BrowserCommand, arg?: string) => void) => () => void;
+    emulate: (webContentsId: number, device: EmulatedDevice | null) => Promise<{ ok: boolean; error?: string }>;
   };
 }

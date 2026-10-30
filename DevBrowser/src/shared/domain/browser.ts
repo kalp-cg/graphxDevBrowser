@@ -46,3 +46,94 @@ export const WorkspaceSessionSchema = z.object({
   updatedAt: z.number()
 });
 export type WorkspaceSession = z.infer<typeof WorkspaceSessionSchema>;
+
+/** A browsing container: its own cookies, storage and cache (an Electron session partition). */
+export interface Profile {
+  key: string;
+  name: string;
+}
+
+export const PROFILES: Profile[] = [
+  { key: 'persist:dev-default', name: 'Default' },
+  { key: 'persist:dev-admin', name: 'Admin' },
+  { key: 'persist:dev-customer', name: 'Customer' }
+];
+
+/** Where the omnibox sends text that is not an address. */
+export const SEARCH_URL = 'https://duckduckgo.com/?q=';
+
+const LOCAL_HOST = /^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|[\w-]+\.(?:local|test|localhost)|(?:\d{1,3}\.){3}\d{1,3})(:\d+)?(\/.*)?$/i;
+
+/**
+ * Omnibox text -> a URL to load. Addresses keep their scheme; local and LAN hosts get http (dev servers rarely
+ * serve TLS); anything with a dot and no spaces gets https; everything else is a search.
+ */
+export function toNavigableUrl(input: string): string {
+  const text = input.trim();
+  if (!text) return 'about:blank';
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(text) || /^(about|data|file|view-source):/i.test(text)) return text;
+  if (/^\d+$/.test(text)) return `http://localhost:${text}`; // "3000" -> the dev server on that port
+  if (LOCAL_HOST.test(text)) return `http://${text}`;
+  if (!/\s/.test(text) && /^[^/]+\.[a-z]{2,}(:\d+)?(\/.*)?$/i.test(text)) return `https://${text}`;
+  return SEARCH_URL + encodeURIComponent(text);
+}
+
+/** What the omnibox shows when it isn't being edited: no scheme, no trailing slash on a bare host. */
+export function displayUrl(url: string): string {
+  if (!url || url === 'about:blank') return '';
+  return url.replace(/^https?:\/\//, '').replace(/^([^/?#]+)\/$/, '$1');
+}
+
+export type SiteSecurity = 'secure' | 'insecure' | 'local' | 'internal';
+
+export function siteSecurity(url: string): SiteSecurity {
+  if (url.startsWith('https://')) return 'secure';
+  if (!url.startsWith('http://')) return 'internal';
+  try {
+    return LOCAL_HOST.test(new URL(url).host) ? 'local' : 'insecure';
+  } catch {
+    return 'insecure';
+  }
+}
+
+/** A tab's label before the page reports a title: its host, or "New Tab". */
+export function fallbackTitle(url: string): string {
+  if (!url || url === 'about:blank') return 'New Tab';
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
+}
+
+/** Device emulation presets (CSS pixels), as in Chrome DevTools' device toolbar. */
+export interface DevicePreset {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  scale: number;
+  mobile: boolean;
+  userAgent?: string;
+}
+
+const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+const ANDROID_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
+const IPAD_UA = 'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+
+export const DEVICES: DevicePreset[] = [
+  { id: 'iphone-se', name: 'iPhone SE', width: 375, height: 667, scale: 2, mobile: true, userAgent: IPHONE_UA },
+  { id: 'iphone-15', name: 'iPhone 15', width: 393, height: 852, scale: 3, mobile: true, userAgent: IPHONE_UA },
+  { id: 'pixel-8', name: 'Pixel 8', width: 412, height: 915, scale: 2.625, mobile: true, userAgent: ANDROID_UA },
+  { id: 'ipad-air', name: 'iPad Air', width: 820, height: 1180, scale: 2, mobile: true, userAgent: IPAD_UA },
+  { id: 'laptop', name: 'Laptop', width: 1280, height: 800, scale: 2, mobile: false },
+  { id: 'desktop', name: 'Desktop HD', width: 1920, height: 1080, scale: 1, mobile: false }
+];
+
+export const ZOOM_LEVELS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+/** The next zoom level up or down from `current`, Chrome's steps. */
+export function stepZoom(current: number, direction: 1 | -1): number {
+  if (direction > 0) return ZOOM_LEVELS.find(z => z > current + 0.001) ?? ZOOM_LEVELS[ZOOM_LEVELS.length - 1]!;
+  return [...ZOOM_LEVELS].reverse().find(z => z < current - 0.001) ?? ZOOM_LEVELS[0]!;
+}

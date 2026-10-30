@@ -87,12 +87,13 @@ export class SentinelGraphClient {
   public async status(): Promise<SentinelStatus> {
     if (!this.isConfigured()) return { ok: false, message: 'SentinelGraph API URL is not set' };
     try {
-      const h = await this.request<{ tigergraph: { ok: boolean; services?: number; error?: string }; graph: string }>(
-        'GET', '/api/health');
+      const h = await this.request<{ tigergraph: { ok: boolean; services?: number; error?: string }; graph: string;
+        backend?: string }>('GET', '/api/health');
+      const engine = h.backend === 'local' ? 'local graph' : 'TigerGraph graph';
       return h.tigergraph.ok
-        ? { ok: true, message: `Connected to SentinelGraph (TigerGraph graph ${h.graph})`, graph: h.graph,
-            services: h.tigergraph.services }
-        : { ok: false, message: `SentinelGraph is up but TigerGraph is not: ${h.tigergraph.error ?? 'unknown'}` };
+        ? { ok: true, message: `Connected to SentinelGraph (${engine} ${h.graph}, ${h.tigergraph.services ?? 0} services)`,
+            graph: h.graph, services: h.tigergraph.services }
+        : { ok: false, message: `SentinelGraph is up but its ${engine} is not: ${h.tigergraph.error ?? 'unknown'}` };
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
     }

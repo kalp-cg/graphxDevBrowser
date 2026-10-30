@@ -1,8 +1,10 @@
 import React, { useEffect } from 'react';
-import { TopNavBar } from './components/layout/TopNavBar';
 import { Sidebar } from './components/layout/Sidebar';
 import { StatusBar } from './components/layout/StatusBar';
-import { BrowserView } from './components/views/BrowserView';
+import { ToolDock } from './components/layout/ToolDock';
+import { TabStrip } from './components/browser/TabStrip';
+import { Toolbar } from './components/browser/Toolbar';
+import { BrowserArea } from './components/browser/BrowserArea';
 import { NetworkView } from './components/views/NetworkView';
 import { ApiClientView } from './components/views/ApiClientView';
 import { SecurityView } from './components/views/SecurityView';
@@ -13,175 +15,130 @@ import { CommandPalette } from './components/common/CommandPalette';
 import { ShortcutsModal } from './components/common/ShortcutsModal';
 import { ToastContainer } from './components/common/ToastContainer';
 import { useAppStore } from './store/useAppStore';
+import { useBrowserStore } from './store/useBrowserStore';
+import { emulate, goBack, goForward, reload, toggleDevTools, zoom } from './browser/pages';
+import { DEVICES, SEARCH_URL } from '../shared/domain/browser';
+import type { BrowserCommand } from '../shared/ipc-channels';
+
+/** Menu shortcuts, page popups and context-menu actions, all routed here from the main process. */
+function runCommand(command: BrowserCommand, arg?: string): void {
+  const browser = useBrowserStore.getState();
+  const app = useAppStore.getState();
+  const active = browser.tabs.find(t => t.id === browser.activeId);
+  switch (command) {
+    case 'new-tab': browser.newTab(); break;
+    case 'open-tab': if (arg) browser.newTab(arg); break;
+    case 'search': if (arg) browser.newTab(SEARCH_URL + encodeURIComponent(arg)); break;
+    case 'close-tab': browser.closeTab(browser.activeId); break;
+    case 'reopen-tab': browser.reopenTab(); break;
+    case 'select-tab': browser.activateIndex(Number(arg)); break;
+    case 'next-tab': browser.cycle(1); break;
+    case 'prev-tab': browser.cycle(-1); break;
+    case 'focus-address': browser.focusAddress(); break;
+    case 'reload': reload(); break;
+    case 'hard-reload': reload(undefined, true); break;
+    case 'back': goBack(); break;
+    case 'forward': goForward(); break;
+    case 'find': browser.setFindOpen(true); break;
+    case 'zoom-in': zoom(1); break;
+    case 'zoom-out': zoom(-1); break;
+    case 'zoom-reset': zoom(0); break;
+    case 'toggle-device':
+      if (active) void emulate(active.id, active.device ? null : DEVICES[1]!.id);
+      break;
+    case 'toggle-split': browser.toggleSplit(); break;
+    case 'toggle-panel': app.togglePanel(); break;
+    case 'page-devtools': toggleDevTools(); break;
+    case 'command-palette': app.setCommandPaletteOpen(true); break;
+  }
+}
+
+const PANELS: Record<string, React.FC> = {
+  network: NetworkView,
+  apiClient: ApiClientView,
+  security: SecurityView,
+  dependencies: DependencyView,
+  ai: AIAssistantView,
+  settings: SettingsView
+};
 
 export const App: React.FC = () => {
   const activeView = useAppStore(s => s.activeView);
-  const setActiveView = useAppStore(s => s.setActiveView);
-  const setCommandPaletteOpen = useAppStore(s => s.setCommandPaletteOpen);
-  const setShortcutsModalOpen = useAppStore(s => s.setShortcutsModalOpen);
-  const setHardwareMetrics = useAppStore(s => s.setHardwareMetrics);
-  const checkOllama = useAppStore(s => s.checkOllama);
-  const createNewTab = useAppStore(s => s.createNewTab);
-  const closeTab = useAppStore(s => s.closeTab);
-  const activeTabId = useAppStore(s => s.activeTabId);
+  const panelMaximized = useAppStore(s => s.panelMaximized);
+  const Panel = PANELS[activeView];
 
   useEffect(() => {
+    const app = useAppStore.getState();
     let unsubscribeNetwork: (() => void) | undefined;
-    let metricsInterval: NodeJS.Timeout | undefined;
+    let unsubscribeCommands: (() => void) | undefined;
+    let metricsInterval: ReturnType<typeof setInterval> | undefined;
 
-    // 1. Initial IPC checks & subscriptions
     if (window.devBrowserAPI) {
-      window.devBrowserAPI.system.getHardwareMetrics().then(setHardwareMetrics).catch(console.error);
-      checkOllama();
-
+      window.devBrowserAPI.system.getHardwareMetrics().then(app.setHardwareMetrics).catch(console.error);
+      app.checkOllama();
       // Reconnect to SentinelGraph if it was configured on an earlier launch (token stays in the main process)
-      useAppStore.getState().restoreSentinel().catch(console.error);
-
-      // Poll hardware metrics every 8 seconds
+      app.restoreSentinel().catch(console.error);
       metricsInterval = setInterval(() => {
-        window.devBrowserAPI?.system.getHardwareMetrics().then(setHardwareMetrics).catch(console.error);
+        window.devBrowserAPI?.system.getHardwareMetrics().then(useAppStore.getState().setHardwareMetrics).catch(console.error);
       }, 8000);
 
-      // Subscribe to live CDP network stream
-      unsubscribeNetwork = window.devBrowserAPI.network.onStreamTransaction((tx) => {
+      unsubscribeNetwork = window.devBrowserAPI.network.onStreamTransaction(tx => {
         useAppStore.getState().addTransaction(tx);
-
-        // Fetch refreshed security audit findings
         window.devBrowserAPI?.security.getFindings().then(findings => {
-          if (findings && findings.length > 0) {
-            useAppStore.getState().setFindings(findings);
-          }
+          if (findings.length > 0) useAppStore.getState().setFindings(findings);
         }).catch(console.error);
       });
+      unsubscribeCommands = window.devBrowserAPI.browser.onCommand(runCommand);
     }
 
-    // 2. Global Keyboard Shortcuts Listener
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-      const cmdKey = isMac ? e.metaKey : e.ctrlKey;
-      const targetTag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-      const isInput = targetTag === 'input' || targetTag === 'textarea' || (e.target as HTMLElement)?.isContentEditable;
-
-      // Cmd+K: Command Palette
-      if (cmdKey && e.key.toLowerCase() === 'k') {
+    // Shortcuts that are not in the app menu (the menu handles the rest, even while a page has focus).
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const typing = ['input', 'textarea', 'select'].includes(target.tagName.toLowerCase()) || target.isContentEditable;
+      const cmd = navigator.platform.toUpperCase().includes('MAC') ? e.metaKey : e.ctrlKey;
+      if (cmd && e.key === ',') {
         e.preventDefault();
-        setCommandPaletteOpen(true);
-        return;
-      }
-
-      // ?: Shortcuts Modal (when not typing in an input)
-      if (e.key === '?' && !isInput) {
+        useAppStore.getState().setActiveView('settings');
+      } else if (e.key === '?' && !typing) {
         e.preventDefault();
-        setShortcutsModalOpen(true);
-        return;
-      }
-
-      // Cmd+,: Open Settings
-      if (cmdKey && e.key === ',') {
-        e.preventDefault();
-        setActiveView('settings');
-        return;
-      }
-
-      // Cmd+T: New Tab
-      if (cmdKey && e.key.toLowerCase() === 't') {
-        e.preventDefault();
-        createNewTab();
-        return;
-      }
-
-      // Cmd+W: Close Tab
-      if (cmdKey && e.key.toLowerCase() === 'w') {
-        e.preventDefault();
-        closeTab(activeTabId);
-        return;
-      }
-
-      // View Switching: Cmd+1 through Cmd+6
-      if (cmdKey && ['1', '2', '3', '4', '5', '6'].includes(e.key)) {
-        e.preventDefault();
-        const viewMap: Record<string, typeof activeView> = {
-          '1': 'browser',
-          '2': 'network',
-          '3': 'apiClient',
-          '4': 'security',
-          '5': 'dependencies',
-          '6': 'ai'
-        };
-        const nextView = viewMap[e.key];
-        if (nextView) setActiveView(nextView);
+        useAppStore.getState().setShortcutsModalOpen(true);
+      } else if (e.key === 'Escape' && useBrowserStore.getState().findOpen) {
+        useBrowserStore.getState().setFindOpen(false);
       }
     };
-
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', onKeyDown);
     return () => {
       if (metricsInterval) clearInterval(metricsInterval);
-      if (unsubscribeNetwork) unsubscribeNetwork();
-      window.removeEventListener('keydown', handleKeyDown);
+      unsubscribeNetwork?.();
+      unsubscribeCommands?.();
+      window.removeEventListener('keydown', onKeyDown);
     };
-  }, [activeTabId, checkOllama, closeTab, createNewTab, setActiveView, setCommandPaletteOpen, setHardwareMetrics, setShortcutsModalOpen]);
-
-  const renderActiveView = () => {
-    switch (activeView) {
-      case 'browser':
-        return <BrowserView />;
-      case 'network':
-        return <NetworkView />;
-      case 'apiClient':
-        return <ApiClientView />;
-      case 'security':
-        return <SecurityView />;
-      case 'dependencies':
-        return <DependencyView />;
-      case 'ai':
-        return <AIAssistantView />;
-      case 'settings':
-        return <SettingsView />;
-      default:
-        return <BrowserView />;
-    }
-  };
+  }, []);
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100vh',
-      width: '100vw',
-      background: 'var(--bg-primary)',
-      color: 'var(--text-primary)',
-      overflow: 'hidden'
-    }}>
-      {/* Top Application Bar & Tabs */}
-      <TopNavBar />
-
-      {/* Main Center Area: Left Sidebar + Center View */}
-      <div style={{
-        flex: 1,
-        display: 'flex',
-        overflow: 'hidden'
-      }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden',
+      background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
+      <TabStrip />
+      <Toolbar />
+      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         <Sidebar />
-        <main style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          position: 'relative'
-        }}>
-          {renderActiveView()}
+        <main style={{ flex: 1, minWidth: 0, display: 'flex' }}>
+          <BrowserArea hidden={!!Panel && panelMaximized} />
+          {Panel && <ToolDock><Panel /></ToolDock>}
         </main>
       </div>
-
-      {/* Bottom Hardware Telemetry & Provider Status Bar */}
       <StatusBar />
-
-      {/* Overlays & Modals */}
       <CommandPalette />
       <ShortcutsModal />
       <ToastContainer />
     </div>
   );
 };
+
+// The active tab's URL is what investigations and the AI assistant call "the current page".
+useBrowserStore.subscribe(state => {
+  const url = state.tabs.find(t => t.id === state.activeId)?.url ?? 'about:blank';
+  if (useAppStore.getState().currentUrl !== url) useAppStore.getState().setCurrentUrl(url);
+});
 
 export default App;
