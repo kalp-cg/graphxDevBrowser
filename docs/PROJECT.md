@@ -41,8 +41,12 @@ RCAEval is a public benchmark of real injected faults with the true root cause l
 
 | System | Services | Cases | Right cause first | In top 3 |
 |---|---|---|---|---|
-| Online Boutique | about 12 | 90 | 93% | 94% |
-| Train Ticket | about 69 | see `CHANGELOG.md` | see `CHANGELOG.md` | see `CHANGELOG.md` |
+| Online Boutique | about 12 | 90 | 86% | 93% |
+| Train Ticket | about 69 | 60 of 90 | 73% | 82% |
+
+A random guess gets 8% and 1.5%. On Train Ticket the simple "strongest metric anomaly" baseline (no graph) ranks about as well at the
+top (68% first, 90% in the top three), and memory faults (50%) and packet loss (56%) are often missed. So at big-system scale the graph
+reasoning helps less than it does on the small system, and ranking among many flagged services is the main open problem.
 
 Before the latency and metrics detectors were added, the product found 0 of 90, because it only noticed faults that raised errors. That
 is why the detectors exist.

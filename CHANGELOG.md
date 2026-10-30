@@ -20,8 +20,12 @@ All notable changes. Versions follow [semantic versioning](https://semver.org/).
   a fault is never learned as normal) and marks a service unhealthy, with an alert, when it is far above its own normal.
 - **`POST /api/metrics`.** Time series per service (e.g. a Prometheus `query_range`); a service whose recent window is far outside its
   own history is marked unhealthy. A service that is always busy is not.
-- Result, product only, traces and metrics together: right root cause first in 93% of 90 cases (93% on the 60 held-out), in the top
-  three in 94%. See `docs/TESTING.md` for how to reproduce it and what it does not show.
+- Result, product only, traces and metrics together (RCAEval, final numbers; an earlier 93% leaned on an arbitrary alphabetical
+  tiebreak and was optimistic): Online Boutique, 90 cases: right cause first in **86%**, in the top three in 93%. Train Ticket (69
+  services), 60 cases: first in **73%**, top three 82%. Random guessing: 8% and 1.5%. See `docs/TESTING.md` to reproduce.
+- Weak spots, stated plainly: on Train Ticket memory faults (50% in top 3) and packet loss (56%) are often missed, and the strongest-
+  anomaly baseline with no graph ranks about as well at the top (68% first, 90% top three), so at 69 services the graph adds little
+  over a good anomaly detector. Ranking among many flagged services is the open problem.
 
 ### Sandbox test
 - **Sandbox test** button on the service graph: loads a 38-service company (8 databases, 8 teams, 18 engineers, 101 deployments,
