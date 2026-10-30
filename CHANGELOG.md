@@ -4,6 +4,17 @@ All notable changes. Versions follow [semantic versioning](https://semver.org/).
 
 ## Unreleased
 
+### Run, Console, and what is running on your machine
+- **Run panel.** Choose your project folder; DevBrowser suggests what to run from what is in it (npm/pnpm/yarn/bun scripts, Django, Go,
+  Rust, Gradle, Maven, Docker Compose, .NET, Swift, Python, Make). It shows the output, opens the page in a tab the moment the server
+  announces its address, and stops everything the command started. When a run dies it says why in plain words: a port already taken
+  (and who holds it, with a button to stop that process and run again), a missing module or command, a missing environment variable,
+  a database that is not up, a compile error, a crash, out of memory. SentinelGraph is told when the server crashes and when it is back.
+- **Console panel.** Every tab's console errors, warnings and failed loads in one list, repeats folded into a counter, filterable,
+  copyable, with a badge on the sidebar even when the panel is closed.
+- **Running on your machine.** A new tab lists the local servers that are up, with the title of the page each serves; one click opens it.
+- Fixed: the sandbox exam crashed at the end (`soft_reset` was not imported) and left the company broken.
+
 ### Browser: tabs, and a dev server that dies
 - Tabs scroll and keep the active tab in view; they can be pinned, dragged to reorder, and right-clicked (reload, duplicate, pin, close
   others, close to the right, reopen closed tab); double-click the empty strip for a new tab; the close button shows on hover.

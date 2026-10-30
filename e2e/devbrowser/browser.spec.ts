@@ -1,5 +1,7 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from "@playwright/test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { connect } from "node:net";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import os from "node:os";
@@ -572,6 +574,120 @@ test("a dev server that dies under a tab is noticed at once, shown on the tab, a
   await expect(page.getByRole("tab", { name: /Dev App/ })).not.toHaveAttribute("aria-label", /server stopped/);
   await page.getByRole("button", { name: /^Close Dev App/ }).click();
   await new Promise<void>(r => server.close(() => r()));
+});
+
+/** The folder dialog is native, so a test answers it from the main process. */
+const chooseFolder = (dir: string) =>
+  app.evaluate(({ dialog }, d) => { dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [d] })) as typeof dialog.showOpenDialog; }, dir);
+
+test("run panel: start a project, its page opens by itself, a crash is explained, a taken port is freed", async () => {
+  test.setTimeout(120_000);
+  const dir = mkdtempSync(path.join(os.tmpdir(), "devbrowser-run-"));
+  writeFileSync(path.join(dir, "package.json"), JSON.stringify({ scripts: { dev: "node server.js" } }));
+  writeFileSync(path.join(dir, "server.js"),
+    "require('http').createServer((q,r)=>{r.setHeader('content-type','text/html');r.end('<title>Run Test App</title><h1>hi</h1>')})" +
+    ".listen(7801,()=>console.log('  ➜  Local:   http://localhost:7801/'));");
+  const tool = page.getByRole("navigation", { name: "Tools" });
+  await tool.getByRole("button", { name: "Run", exact: true }).click();
+  const run = page.getByRole("region", { name: "Run panel" });
+  await chooseFolder(dir);
+  await run.getByRole("button", { name: /Choose folder/ }).click();
+  await expect(run.getByRole("button", { name: "npm run dev" })).toBeVisible();          // suggested from package.json
+  await expect(run.getByRole("textbox", { name: "Command" })).toHaveValue("npm run dev");
+  await run.getByRole("textbox", { name: "Command" }).fill("node server.js");
+  await run.getByRole("button", { name: "Run", exact: true }).click();
+  await expect(run.getByLabel("Run status", { exact: true })).toHaveText("Running");
+  await expect(run.getByRole("log", { name: "Output" })).toContainText("http://localhost:7801/", { timeout: 15_000 });
+  await expect(run.getByLabel("Addresses it serves").getByRole("button", { name: /localhost:7801/ })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /Run Test App/ })).toBeVisible({ timeout: 15_000 });   // opened without being asked
+  await shot("19-run-panel");
+  await run.getByRole("button", { name: "Stop" }).click();
+  await expect(run.getByLabel("Run status", { exact: true })).toHaveText("Stopped");
+  await expect.poll(() => fetch("http://127.0.0.1:7801/").then(() => true, () => false)).toBe(false);   // really gone
+
+  // A crash is explained in plain words.
+  await run.getByRole("textbox", { name: "Command" }).fill(`node -e "console.log('starting'); process.stderr.write(\\"Error: Cannot find module 'express'\\\\n\\"); process.exit(1)"`);
+  await run.getByRole("button", { name: "Run", exact: true }).click();
+  const why = run.getByRole("alert", { name: "Why it stopped" });
+  await expect(why).toContainText('Missing module "express"', { timeout: 15_000 });
+  await expect(why).toContainText("Install dependencies");
+  await expect(run.getByLabel("Run status", { exact: true })).toContainText("Crashed (exit 1)");
+  await shot("20-run-crash");
+
+  // A port that is taken: who holds it, and a button that frees it and tries again.
+  const hasLsof = await new Promise<boolean>(r => spawn("lsof", ["-v"]).on("error", () => r(false)).on("close", () => r(true)));
+  if (hasLsof && process.platform !== "win32") {
+    let holder: ReturnType<typeof spawn> | undefined;
+    try {
+    holder = spawn(process.execPath, ["-e", "require('http').createServer().listen(7802);setInterval(()=>{},1000)"], { stdio: "ignore" });
+    await expect.poll(() => new Promise<boolean>(r => { const c = connect({ port: 7802, host: "127.0.0.1" }); c.on("connect", () => { c.destroy(); r(true); }); c.on("error", () => r(false)); })).toBe(true);
+    await run.getByRole("textbox", { name: "Command" }).fill(`node -e "require('http').createServer().listen(7802,()=>{console.log('Local: http://localhost:7802');setInterval(()=>{},1000)})"`);
+    await run.getByRole("button", { name: "Run", exact: true }).click();
+    await expect(why).toContainText("Port 7802 is already taken", { timeout: 15_000 });
+    await expect(why).toContainText(/Held by .*node/);
+    await why.getByRole("button", { name: "Stop it and run again" }).click();
+    await expect(run.getByLabel("Run status", { exact: true })).toHaveText("Running", { timeout: 20_000 });
+    await expect.poll(() => holder!.exitCode !== null || holder!.signalCode !== null).toBe(true);        // the old holder was stopped
+    await run.getByRole("button", { name: "Stop" }).click();
+    } finally {
+      holder?.kill();          // whatever happened above, nothing is left holding the port for the next run
+    }
+  }
+  // Leave nothing open that other tests do not expect.
+  await tool.getByRole("button", { name: "Run", exact: true }).click();
+  const mine = page.getByRole("tab", { name: /Run Test App|localhost:7802/ });
+  while (await mine.count()) {
+    await mine.first().click({ button: "right" });
+    await page.getByRole("menuitem", { name: /^Close\s?(Cmd|Ctrl)/ }).click();
+  }
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("console: errors and warnings from a page appear with a badge, even with the panel closed", async () => {
+  const srv = await new Promise<import("node:http").Server>(resolve => {
+    const s = createServer((_q, r) => {
+      r.setHeader("content-type", "text/html");
+      r.end("<title>Console Test</title><script>console.log('hello');console.warn('careful now');console.error('page exploded');console.error('page exploded');</script>");
+    });
+    s.listen(7803, "127.0.0.1", () => resolve(s));
+  });
+  await page.getByRole("button", { name: "New tab", exact: true }).click();
+  await go("localhost:7803");
+  await expect(page.getByRole("tab", { name: /Console Test/ })).toBeVisible();
+  const tool = page.getByRole("navigation", { name: "Tools" });
+  await expect(tool.getByRole("button", { name: "Console" })).toContainText("2");       // two errors, with the panel closed
+  await tool.getByRole("button", { name: "Console" }).click();
+  const con = page.getByRole("region", { name: "Console panel" });
+  await expect(con.getByText("page exploded")).toHaveCount(1);                           // the repeat is folded...
+  await expect(con.getByLabel("2 times")).toBeVisible();                                 // ...into a counter
+  await expect(con.getByText("careful now")).toBeVisible();
+  await con.getByRole("button", { name: /^Errors/ }).click();
+  await expect(con.getByText("careful now")).toHaveCount(0);
+  await con.getByLabel("Filter console").fill("nothing like this");
+  await expect(con.getByText("Nothing matches the filter.")).toBeVisible();
+  await con.getByLabel("Filter console").fill("");
+  await con.getByRole("button", { name: "Clear console" }).click();
+  await expect(tool.getByRole("button", { name: "Console" })).not.toContainText("2");
+  await tool.getByRole("button", { name: "Console" }).click();
+  await page.getByRole("tab", { name: /Console Test/ }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: /^Close\s?(Cmd|Ctrl)/ }).click();
+  await new Promise<void>(r => { srv.closeAllConnections(); srv.close(() => r()); });
+});
+
+test("a new tab lists the local servers that are up, and opens one with a click", async () => {
+  const srv = await new Promise<import("node:http").Server>(resolve => {
+    const s = createServer((_q, r) => { r.setHeader("content-type", "text/html"); r.end("<title>Ports Test</title>ok"); });
+    s.listen(5555, "127.0.0.1", () => resolve(s));
+  });
+  await page.getByRole("button", { name: "New tab", exact: true }).click();
+  const list = page.getByRole("region", { name: "Running on your machine" });
+  await expect(list.getByRole("button", { name: "Open localhost:5555" })).toContainText("Ports Test", { timeout: 15_000 });
+  await expect(list.getByRole("button", { name: "Open localhost:7400" })).toContainText("Sandbox Shop");   // the sandbox shop is up
+  await list.getByRole("button", { name: "Open localhost:5555" }).click();
+  await expect(page.getByRole("tab", { name: /Ports Test/ })).toBeVisible();
+  await page.getByRole("tab", { name: /Ports Test/ }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: /^Close\s?(Cmd|Ctrl)/ }).click();
+  await new Promise<void>(r => { srv.closeAllConnections(); srv.close(() => r()); });
 });
 
 test("sandbox test: load the 38-service company and see the agent scored on what was broken", async () => {

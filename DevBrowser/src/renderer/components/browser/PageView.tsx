@@ -5,6 +5,8 @@ import { DEVICES } from '../../../shared/domain/browser';
 import { emulate, markReady, navigate, registerPage, reload } from '../../browser/pages';
 import { profileName, useBrowserStore, type Tab } from '../../store/useBrowserStore';
 import { useAppStore } from '../../store/useAppStore';
+import { useConsoleStore } from '../../store/useConsoleStore';
+import { levelOf } from '../../../shared/domain/console';
 import { FindBar } from './FindBar';
 import { StartPage } from './StartPage';
 
@@ -76,11 +78,17 @@ export const PageView: React.FC<Props> = ({ tab, visible, paneOrder, showPaneHea
       if (t) useBrowserStore.getState().record(t.url, e.title);
     };
     const onFavicon = (e: Electron.PageFaviconUpdatedEvent) => update(id, { favicon: e.favicons[0] });
+    const onConsole = (e: Electron.ConsoleMessageEvent) =>
+      useConsoleStore.getState().push(id, levelOf(e.level), e.message, e.sourceId?.replace(/^https?:\/\/[^/]+/, '') ?? '', e.line);
     const onFail = (e: Electron.DidFailLoadEvent) => {
       if (!e.isMainFrame || e.errorCode === ABORTED) return;
+      useConsoleStore.getState().push(id, 'error', `Failed to load ${e.validatedURL}: ${e.errorDescription}`);
       update(id, { loading: false, error: { code: e.errorCode, description: e.errorDescription, url: e.validatedURL } });
     };
-    const onCrash = () => update(id, { loading: false, error: { code: 0, description: 'The page crashed', url: state()?.url ?? '' } });
+    const onCrash = () => {
+      useConsoleStore.getState().push(id, 'error', 'The page crashed (its renderer process exited)');
+      update(id, { loading: false, error: { code: 0, description: 'The page crashed', url: state()?.url ?? '' } });
+    };
     // Focus selects the tab only for the other pane of a split view: a hidden tab's page can receive focus
     // (a reload, a script calling focus()) and must not steal the selection.
     const onFocus = () => {
@@ -96,6 +104,7 @@ export const PageView: React.FC<Props> = ({ tab, visible, paneOrder, showPaneHea
     view.addEventListener('page-title-updated', onTitle as EventListener);
     view.addEventListener('page-favicon-updated', onFavicon as EventListener);
     view.addEventListener('did-fail-load', onFail as EventListener);
+    view.addEventListener('console-message', onConsole as EventListener);
     view.addEventListener('render-process-gone', onCrash);
     view.addEventListener('focus', onFocus);
     return () => {
@@ -107,6 +116,7 @@ export const PageView: React.FC<Props> = ({ tab, visible, paneOrder, showPaneHea
       view.removeEventListener('did-navigate-in-page', onInPage as EventListener);
       view.removeEventListener('page-title-updated', onTitle as EventListener);
       view.removeEventListener('page-favicon-updated', onFavicon as EventListener);
+      view.removeEventListener('console-message', onConsole as EventListener);
       view.removeEventListener('did-fail-load', onFail as EventListener);
       view.removeEventListener('render-process-gone', onCrash);
       view.removeEventListener('focus', onFocus);

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { validateEnvironment } from '../shared/env';
 import { PartitionManager } from './session/partition-manager';
 import { configureSecurityDirectives } from './security/cdp-security';
-import { registerIpcHandlers } from './bridge/ipc-handlers';
+import { registerIpcHandlers, runner } from './bridge/ipc-handlers';
 import { OllamaClient } from './ai/ollama-client';
 import { CredentialVault } from './crypto/vault';
 import { PassiveSecurityAuditor } from './security/auditor';
@@ -208,4 +208,5 @@ app.on('child-process-gone', (_event, details) => log('error', `${details.type} 
 app.on('before-quit', () => {
   log('info', 'shutting down');
   sentinelClient?.dispose();
+  runner?.stopAll();   // a dev server started from here must not outlive the app
 });

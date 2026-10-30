@@ -12,6 +12,7 @@ import { useAppStore } from './store/useAppStore';
 import { useBrowserStore } from './store/useBrowserStore';
 import { FULL_PAGE_VIEWS, useNarrow } from './useNarrow';
 import { startDevServerWatch } from './browser/devServerWatch';
+import { startRunListener } from './store/useRunStore';
 import { emulate, goBack, goForward, reload, toggleDevTools, zoom } from './browser/pages';
 import { DEVICES, SEARCH_URL } from '../shared/domain/browser';
 import type { BrowserCommand } from '../shared/ipc-channels';
@@ -19,6 +20,8 @@ import type { BrowserCommand } from '../shared/ipc-channels';
 // Each tool is its own chunk, loaded when first opened (the graph library alone is a third of the bundle).
 const view = (load: () => Promise<Record<string, React.ComponentType>>, name: string) =>
   lazy(() => load().then(m => ({ default: m[name]! })));
+const RunView = view(() => import('./components/views/RunView'), 'RunView');
+const ConsoleView = view(() => import('./components/views/ConsoleView'), 'ConsoleView');
 const NetworkView = view(() => import('./components/views/NetworkView'), 'NetworkView');
 const ApiClientView = view(() => import('./components/views/ApiClientView'), 'ApiClientView');
 const SecurityView = view(() => import('./components/views/SecurityView'), 'SecurityView');
@@ -61,6 +64,8 @@ function runCommand(command: BrowserCommand, arg?: string): void {
 }
 
 const PANELS: Record<string, React.ComponentType> = {
+  run: RunView,
+  console: ConsoleView,
   network: NetworkView,
   apiClient: ApiClientView,
   security: SecurityView,
@@ -81,6 +86,7 @@ export const App: React.FC = () => {
     let unsubscribeCommands: (() => void) | undefined;
     let metricsInterval: ReturnType<typeof setInterval> | undefined;
     let stopWatch: (() => void) | undefined;
+    let stopRun: (() => void) | undefined;
 
     if (window.devBrowserAPI) {
       window.devBrowserAPI.system.getHardwareMetrics().then(app.setHardwareMetrics).catch(console.error);
@@ -99,6 +105,7 @@ export const App: React.FC = () => {
       });
       unsubscribeCommands = window.devBrowserAPI.browser.onCommand(runCommand);
       stopWatch = startDevServerWatch();
+      stopRun = startRunListener();
     }
 
     // Shortcuts that are not in the app menu (the menu handles the rest, even while a page has focus).
@@ -122,6 +129,7 @@ export const App: React.FC = () => {
       unsubscribeNetwork?.();
       unsubscribeCommands?.();
       stopWatch?.();
+      stopRun?.();
       window.removeEventListener('keydown', onKeyDown);
     };
   }, []);

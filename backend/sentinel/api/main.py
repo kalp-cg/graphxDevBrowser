@@ -30,7 +30,7 @@ from ..ingest.metrics import ingest_metrics
 from ..ingest.otel import ingest_traces, record_change
 from ..seed.generator import refresh_on_call, wipe
 from ..seed.scenarios import (SCENARIOS, inject_chaos, inject_scenario, reset, sandbox_chaos, sandbox_enabled,
-                              sandbox_reset, service_count)
+                              sandbox_reset, service_count, soft_reset)
 from ..tools import actions, read, rootcause
 from ..tools.common import now_ms
 from .graph_view import graph_snapshot, incidents_view

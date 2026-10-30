@@ -1,5 +1,8 @@
 import React from 'react';
-import { Bot, Network, Send, Settings, Share2, ShieldAlert } from 'lucide-react';
+import { Bot, Network, Play, Send, Settings, Share2, ShieldAlert, Terminal } from 'lucide-react';
+import { useRunStore } from '../../store/useRunStore';
+import { useConsoleStore } from '../../store/useConsoleStore';
+import { useBrowserStore } from '../../store/useBrowserStore';
 import { useAppStore, type NavigationView } from '../../store/useAppStore';
 import { forSite } from '../../../shared/domain/browser';
 
@@ -18,7 +21,15 @@ export const Sidebar: React.FC = () => {
   const sentinel = useAppStore(s => s.sentinelStatus);
   const running = useAppStore(s => s.sentinelRun.phase === 'running');
 
+  const runStatus = useRunStore(s => s.status);
+  const activeTab = useBrowserStore(s => s.activeId);
+  const pageErrors = useConsoleStore(s => s.entries.filter(e => e.level === 'error' && e.tabId === activeTab).reduce((n, e) => n + e.count, 0));
+
   const items: { id: NavigationView; label: string; icon: React.ReactNode; badge?: string; tone?: 'danger' | 'accent' }[] = [
+    { id: 'run', label: 'Run', icon: <Play size={18} />,
+      badge: runStatus === 'running' ? '' : runStatus === 'crashed' ? '!' : undefined, tone: runStatus === 'crashed' ? 'danger' : 'accent' },
+    { id: 'console', label: 'Console', icon: <Terminal size={18} />,
+      badge: pageErrors ? String(Math.min(pageErrors, 99)) : undefined, tone: 'danger' },
     { id: 'network', label: 'Network', icon: <Network size={18} />,
       badge: failed ? String(failed) : requests ? String(Math.min(requests, 999)) : undefined, tone: failed ? 'danger' : undefined },
     { id: 'apiClient', label: 'API Client', icon: <Send size={18} /> },

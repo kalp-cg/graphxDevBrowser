@@ -21,10 +21,13 @@ Do these in order. Each one makes the next one more valuable.
 3. Browser: tabs now scroll and keep the active tab in view, can be pinned, dragged to reorder, right-clicked (reload, duplicate, pin, close others, close to the right, reopen), and a tab shows a red warning when its dev server dies.
 4. **Dev server watch.** When a local server stops answering, the tab says so, you get a notification, and SentinelGraph gets an alert on that service. When it comes back the tab reloads and the alert clears. Tested end to end by killing a real server under a tab.
 5. Resolved alerts now clear the service (a recovered server stayed "degraded" before).
+6. **Run panel**: start your project from DevBrowser; the page opens by itself; a crash is explained in plain words (taken port and who holds
+   it, missing module, missing env var, database down, compile error); SentinelGraph is told. This was Step 1 below.
+7. **Console panel** and **"Running on your machine"** on the start page.
 
 ### Next, in this order
 
-**Step 1. Catch build crashes, not only server crashes** (the idea you described).
+**Step 1 (done: the Run panel). Catch build crashes, not only server crashes.**
 Today we notice a server that stops answering. We do not yet notice `npm run dev` exiting with an error, or a build failing. Add a small "Run" panel in DevBrowser: you start your dev command in it, we keep the process, and when it exits non-zero or prints a stack trace we raise the same alert on the service that owns that folder. This is the feature that makes DevBrowser "the one place a developer works". Effort: about two days. Do this first: it is what judges will remember.
 
 **Step 2. Fix the big-system ranking.**
@@ -51,7 +54,7 @@ Before you start: run `scripts/start-demo.sh`, open the app, check the status ba
 | 0:00 | The problem in one slide | "In a company with 100 services, one failure triggers 50 alerts. Finding the cause takes an hour." |
 | 0:45 | **Open BitChat** (a repo it has never seen) with Connect codebase | "Any language. No config. This is a Swift app, and it mapped 25 modules and their dependencies in under a second." |
 | 1:45 | Browse normally: tabs, pin, drag, right-click, split view, device mode | "It is a real browser. A developer does not leave it." |
-| 2:45 | **Kill a dev server** under a tab | "The tab turns red, the developer is told, and the service map already shows it. Restart the server and it recovers by itself." |
+| 2:45 | **Run your project from the Run panel**, then kill it | "The tab turns red, the developer is told, and the service map already shows it. Restart the server and it recovers by itself." |
 | 4:00 | Sandbox test: load the 38-service company, press **Break** on a database | "Fifty services, one broken database. The graph walks from the symptoms to the cause." Press Investigate. |
 | 5:15 | Sandbox exam: 12 cases, built-in agent and a local model | "It finds what we broke in 12 of 12 cases, with a local model too. We then tested it on real data." |
 | 6:15 | **The real-data slide** (see Part 3): 86% and 73% | "This is a public benchmark of real injected faults, not our own data. Random is 8%. It started at 0% and we fixed it." |
@@ -82,5 +85,5 @@ Rules for the demo:
 - Do not say it works on production systems.
 - Do not quote the earlier 93%. The honest number is 86%.
 - Do not say it reads logs. It does not yet.
-- Do not say it catches build crashes. It catches a dev server that stops; build crashes are Step 1.
+- It catches crashes of anything you start from the Run panel (servers, builds, tests) and dev servers that stop. It does not see a build you ran in a separate terminal.
 - The installers are not code-signed, so the first launch needs "Open anyway" in macOS settings.

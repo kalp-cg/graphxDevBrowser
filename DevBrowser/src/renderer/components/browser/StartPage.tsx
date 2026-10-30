@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Keyboard, Network, Share2, ShieldAlert, Send, Star, X } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Keyboard, Network, Play, Server, Share2, ShieldAlert, Send, Star, X } from 'lucide-react';
 import { displayUrl } from '../../../shared/domain/browser';
 import { navigate } from '../../browser/pages';
 import { useAppStore } from '../../store/useAppStore';
@@ -21,6 +21,16 @@ export const StartPage: React.FC<{ tabId: string }> = ({ tabId }) => {
   const connectCodebase = useAppStore(s => s.connectCodebase);
   const setShortcuts = useAppStore(s => s.setShortcutsModalOpen);
   const connected = sentinel === 'connected';
+  const [servers, setServers] = useState<{ port: number; title: string; status: number }[]>([]);
+
+  // The local servers that are up right now, so opening your app is one click, not remembering a port.
+  useEffect(() => {
+    let alive = true;
+    const scan = () => window.devBrowserAPI?.browser.scanPorts().then(s => alive && setServers(s)).catch(() => undefined);
+    void scan();
+    const timer = setInterval(() => void scan(), 4000);
+    return () => { alive = false; clearInterval(timer); };
+  }, []);
 
   const recent = useMemo(() => {
     const seen = new Set<string>();
@@ -80,6 +90,30 @@ export const StartPage: React.FC<{ tabId: string }> = ({ tabId }) => {
               <button className="btn" onClick={() => setActiveView('apiClient')}><Send size={13} /> API client</button>
             </div>
           </Step>
+        </section>
+
+        <section aria-label="Running on your machine" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div className="section-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Server size={11} /> Running on your machine</div>
+          {servers.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              No local server is up.
+              <button className="btn" style={{ height: 24 }} onClick={() => setActiveView('run')}><Play size={12} /> Start your project</button>
+            </div>
+          ) : servers.map(s => (
+            <button key={s.port} onClick={() => navigate(tabId, `localhost:${s.port}`)} aria-label={`Open localhost:${s.port}`}
+              style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '7px 10px', border: 0, borderRadius: 6,
+                background: 'transparent', color: 'var(--text-primary)', textAlign: 'left', cursor: 'pointer' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+              <span style={{ width: 8, height: 8, borderRadius: 4, background: s.status >= 500 ? 'var(--danger)' : 'var(--accent)', alignSelf: 'center' }} />
+              <span style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+                {s.title || (s.status ? `HTTP ${s.status}` : 'No page')}
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+                localhost:{s.port}
+              </span>
+            </button>
+          ))}
         </section>
 
         {bookmarks.length > 0 && (

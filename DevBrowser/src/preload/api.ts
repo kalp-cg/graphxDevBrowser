@@ -1,3 +1,4 @@
+import type { RunEvent } from '../shared/domain/run';
 import type { BrowserCommand, EmulatedDevice, HardwareMetrics } from '../shared/ipc-channels';
 import type { BrowserTab, ProfilePartition } from '../shared/domain/browser';
 import type { SecurityFinding } from '../shared/domain/security';
@@ -74,7 +75,19 @@ export interface DevBrowserAPI {
   privacy: {
     triggerNuclearShred: () => Promise<ShredResult>;
   };
+  run: {
+    /** Run a command in a folder, like a terminal there. Output arrives through `onEvent`. */
+    start: (command: string, cwd: string) => Promise<{ ok: true; id: string } | { ok: false; error: string }>;
+    stop: (id: string) => Promise<void>;
+    pickFolder: () => Promise<string | null>;
+    inspect: (cwd: string) => Promise<{ ok: true; name: string; suggestions: { label: string; command: string }[] } | { ok: false; error: string }>;
+    portOwner: (port: number) => Promise<{ pid: number; name: string } | null>;
+    killPid: (pid: number) => Promise<boolean>;
+    onEvent: (callback: (event: RunEvent) => void) => () => void;
+  };
   browser: {
+    /** Local servers that are up on this machine, with the title of the page each serves. */
+    scanPorts: () => Promise<{ port: number; title: string; status: number }[]>;
     onCommand: (callback: (command: BrowserCommand, arg?: string) => void) => () => void;
     emulate: (webContentsId: number, device: EmulatedDevice | null) => Promise<{ ok: boolean; error?: string }>;
     /** Slows or cuts one page's network (`none`, `fast-3g`, `slow-3g`, `offline`). */

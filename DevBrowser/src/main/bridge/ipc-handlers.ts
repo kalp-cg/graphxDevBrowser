@@ -13,6 +13,34 @@ import type { SentinelGraphClient } from '../integrations/sentinel-client';
 import type { ChaosKind, InvestigationEvidence, SandboxAction } from '../../shared/domain/sentinel';
 import type { ApiSendRequest } from '../../shared/domain/api-client';
 import { sendApiRequest } from '../network/api-client';
+import { inspectFolder, killPid, portOwner, Runner } from '../run/runner';
+import { COMMON_DEV_PORTS } from '../../shared/domain/run';
+import net_ from 'node:net';
+
+/** The command being run for the developer, if any. Stopped when the app quits. */
+export let runner: Runner | null = null;
+
+/** Is something accepting connections on this port of this machine? */
+const listening = (port: number): Promise<boolean> => new Promise(resolve => {
+  const socket = net_.connect({ port, host: '127.0.0.1', timeout: 300 });
+  socket.once('connect', () => { socket.destroy(); resolve(true); });
+  socket.once('timeout', () => { socket.destroy(); resolve(false); });
+  socket.once('error', () => resolve(false));
+});
+
+/** The local servers that are up, with the title of the page each one serves. */
+async function scanPorts(): Promise<{ port: number; title: string; status: number }[]> {
+  const open = (await Promise.all(COMMON_DEV_PORTS.map(async port => ((await listening(port)) ? port : 0)))).filter(Boolean);
+  return Promise.all(open.map(async port => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/`, { redirect: 'manual', signal: AbortSignal.timeout(1500), headers: { Accept: 'text/html' } });
+      const html = (await res.text()).slice(0, 20000);
+      return { port, status: res.status, title: /<title[^>]*>([^<]{0,120})<\/title>/i.exec(html)?.[1]?.trim() ?? '' };
+    } catch {
+      return { port, status: 0, title: '' };
+    }
+  }));
+}
 
 const BROWSING_PARTITIONS = PROFILES.map(p => p.key);
 
@@ -29,6 +57,32 @@ export function registerIpcHandlers(
     return;
   }
   handlersRegistered = true;
+
+  runner = new Runner(e => BrowserWindow.getAllWindows().forEach(w => w.webContents.send(IPC_CHANNELS.RUN_EVENT, e)));
+  ipcMain.handle(IPC_CHANNELS.RUN_START, async (_event, args: { command: string; cwd: string }) => {
+    try {
+      return { ok: true as const, ...runner!.start(args.command, args.cwd) };
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+  ipcMain.handle(IPC_CHANNELS.RUN_STOP, async (_event, args: { id: string }) => runner!.stop(args.id));
+  ipcMain.handle(IPC_CHANNELS.RUN_PICK_FOLDER, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options = { title: 'Choose the folder to run in', properties: ['openDirectory' as const] };
+    const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    return picked.canceled || !picked.filePaths[0] ? null : picked.filePaths[0];
+  });
+  ipcMain.handle(IPC_CHANNELS.RUN_INSPECT, async (_event, args: { cwd: string }) => {
+    try {
+      return { ok: true as const, ...inspectFolder(args.cwd) };
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+  ipcMain.handle(IPC_CHANNELS.RUN_PORT_OWNER, async (_event, args: { port: number }) => portOwner(Number(args.port)));
+  ipcMain.handle(IPC_CHANNELS.RUN_KILL_PID, async (_event, args: { pid: number }) => killPid(Number(args.pid)));
+  ipcMain.handle(IPC_CHANNELS.BROWSER_SCAN_PORTS, async () => scanPorts());
 
   // 1. Hardware metrics
   ipcMain.handle(IPC_CHANNELS.SYSTEM_GET_HARDWARE_METRICS, async (): Promise<HardwareMetrics> => {

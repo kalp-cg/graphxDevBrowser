@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS, type BrowserCommand, type EmulatedDevice } from '../shared/ipc-channels';
 import type { DevBrowserAPI } from './api';
+import type { RunEvent } from '../shared/domain/run';
 import type { AIDebugContext } from '../shared/domain/ai';
 import type { NetworkTransaction } from '../shared/domain/network';
 import type { InvestigationEvidence } from '../shared/domain/sentinel';
@@ -66,7 +67,21 @@ const devBrowserAPI: DevBrowserAPI = {
   privacy: {
     triggerNuclearShred: () => ipcRenderer.invoke(IPC_CHANNELS.PRIVACY_TRIGGER_NUCLEAR_SHRED)
   },
+  run: {
+    start: (command: string, cwd: string) => ipcRenderer.invoke(IPC_CHANNELS.RUN_START, { command, cwd }),
+    stop: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.RUN_STOP, { id }),
+    pickFolder: () => ipcRenderer.invoke(IPC_CHANNELS.RUN_PICK_FOLDER),
+    inspect: (cwd: string) => ipcRenderer.invoke(IPC_CHANNELS.RUN_INSPECT, { cwd }),
+    portOwner: (port: number) => ipcRenderer.invoke(IPC_CHANNELS.RUN_PORT_OWNER, { port }),
+    killPid: (pid: number) => ipcRenderer.invoke(IPC_CHANNELS.RUN_KILL_PID, { pid }),
+    onEvent: (callback: (event: RunEvent) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, e: RunEvent) => callback(e);
+      ipcRenderer.on(IPC_CHANNELS.RUN_EVENT, listener);
+      return () => { ipcRenderer.removeListener(IPC_CHANNELS.RUN_EVENT, listener); };
+    }
+  },
   browser: {
+    scanPorts: () => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SCAN_PORTS),
     onCommand: (callback: (command: BrowserCommand, arg?: string) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, command: BrowserCommand, arg?: string) => callback(command, arg);
       ipcRenderer.on(IPC_CHANNELS.BROWSER_COMMAND, listener);

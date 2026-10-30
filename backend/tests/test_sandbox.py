@@ -50,3 +50,30 @@ def test_the_builtin_agent_passes_a_sample_of_the_exam(graph):
 
     results = asyncio.run(go())
     assert all(r["correct"] for r in results), [(r["id"], r["outcome"], r["why"]) for r in results]
+
+
+def test_the_exam_runs_through_the_api_and_leaves_the_company_healthy(graph, monkeypatch):
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from sentinel.seed.generator import wipe
+
+    monkeypatch.setenv("TG_GRAPH", "Sentinel_test")
+    for target in ("sentinel.api.main.get_graph", "sentinel.api.graph_view.get_graph",
+                   "sentinel.tools.common.get_graph", "sentinel.seed.scenarios.get_graph"):
+        monkeypatch.setattr(target, lambda name=None: graph)
+    from sentinel.api.main import app
+
+    wipe(graph)
+    with TestClient(app) as api:
+        assert api.post("/api/sandbox/load").json()["services"] == 38
+        assert api.post("/api/sandbox/test", json={"provider": "autopilot", "cases": 2}).json() == {"started": True}
+        for _ in range(120):
+            exam = api.get("/api/sandbox").json()["exam"]
+            if exam["status"] not in ("starting", "running"):
+                break
+            time.sleep(0.5)
+        assert exam["status"] == "done" and exam["summary"]["cases"] == 2, exam
+        assert {v["attributes"]["status"] for v in graph.getVertices("Service", select="name,status")} == {"healthy"}
+    wipe(graph)
