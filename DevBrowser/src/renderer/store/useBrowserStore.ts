@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { fallbackTitle, PROFILES, toNavigableUrl } from '../../shared/domain/browser';
+import { fallbackTitle, PROFILES, toggleBookmark, toNavigableUrl, type Bookmark } from '../../shared/domain/browser';
 
 export { PROFILES };
 
@@ -23,6 +23,8 @@ export interface Tab {
   zoom: number;
   device: string | null;
   rotated: boolean;
+  /** Network throttling preset of this page (not kept across launches: the page itself is new). */
+  throttle: string;
   error: PageError | null;
 }
 
@@ -39,6 +41,10 @@ interface BrowserState {
   split: [string, string] | null;
   closed: Tab[];
   history: HistoryEntry[];
+  bookmarks: Bookmark[];
+  /** Bookmark the active page, or remove its bookmark. */
+  toggleBookmarkOfActive: () => void;
+  removeBookmark: (url: string) => void;
   findOpen: boolean;
   /** Bumped to ask the omnibox to take focus (Cmd+L, new tab). */
   addressFocus: number;
@@ -58,6 +64,7 @@ interface BrowserState {
 
 const SESSION_KEY = 'devbrowser.session.v1';
 const HISTORY_KEY = 'devbrowser.history.v1';
+const BOOKMARKS_KEY = 'devbrowser.bookmarks.v1';
 const MAX_HISTORY = 300;
 const MAX_CLOSED = 20;
 
@@ -67,7 +74,7 @@ const newId = () => `tab-${Date.now().toString(36)}-${(counter++).toString(36)}`
 function makeTab(url: string, profile: string): Tab {
   return {
     id: newId(), initialUrl: url, url, title: fallbackTitle(url), loading: url !== 'about:blank',
-    canGoBack: false, canGoForward: false, profile, zoom: 1, device: null, rotated: false, error: null
+    canGoBack: false, canGoForward: false, profile, zoom: 1, device: null, rotated: false, throttle: 'none', error: null
   };
 }
 
@@ -104,6 +111,19 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   split: null,
   closed: [],
   history: read<HistoryEntry[]>(HISTORY_KEY, []),
+  bookmarks: read<Bookmark[]>(BOOKMARKS_KEY, []),
+  toggleBookmarkOfActive: () => {
+    const tab = get().tabs.find(t => t.id === get().activeId);
+    if (!tab) return;
+    const bookmarks = toggleBookmark(get().bookmarks, tab.url, tab.title);
+    set({ bookmarks });
+    write(BOOKMARKS_KEY, bookmarks);
+  },
+  removeBookmark: url => {
+    const bookmarks = get().bookmarks.filter(b => b.url !== url);
+    set({ bookmarks });
+    write(BOOKMARKS_KEY, bookmarks);
+  },
   findOpen: false,
   addressFocus: 0,
 

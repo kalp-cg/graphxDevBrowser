@@ -89,6 +89,14 @@ export function find(id: string, text: string, forward = true, next = false): vo
 export const stopFind = (id: string) => withPage(id, v => v.stopFindInPage('clearSelection'));
 
 /** Emulate a device on a tab (null = desktop). The page reloads so it sees the new user agent. */
+export async function setThrottle(id: string, presetId: string): Promise<void> {
+  useBrowserStore.getState().update(id, { throttle: presetId });
+  const page = pages.get(id);
+  if (!page?.ready || !window.devBrowserAPI) return;
+  const res = await window.devBrowserAPI.browser.throttle(page.view.getWebContentsId(), presetId);
+  if (!res.ok) console.warn('[browser] throttling failed:', res.error);
+}
+
 export async function emulate(id: string, deviceId: string | null, rotated = false): Promise<void> {
   const store = useBrowserStore.getState();
   store.update(id, { device: deviceId, rotated: deviceId ? rotated : false });

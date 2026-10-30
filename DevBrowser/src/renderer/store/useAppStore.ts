@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import type { NetworkTransaction } from '../../shared/domain/network';
-import type { ApiRequestDraft, EnvironmentProfile, ApiCollection } from '../../shared/domain/api-client';
+import {
+  buildSendRequest, draftFromTransaction, evaluateAssertions, looksSecret,
+  type ApiRequestDraft, type ApiSendResult, type ApiVariable, type AssertionResult
+} from '../../shared/domain/api-client';
 import type { SecurityFinding } from '../../shared/domain/security';
 import type { IGraphNode, IGraphEdge, BlastRadiusResult } from '../../shared/domain/graph';
 import {
@@ -10,6 +13,7 @@ import {
   toEvidence,
   type RunSummary,
   type ChaosKind,
+  type ImpactResult,
   type SentinelResolution,
   type SentinelSnapshot
 } from '../../shared/domain/sentinel';
@@ -71,13 +75,19 @@ interface AppState {
 
   // API Client
   activeRequest: ApiRequestDraft;
-  environments: EnvironmentProfile[];
-  activeEnvironmentId: string;
-  collections: ApiCollection[];
-  apiResponse: Record<string, unknown> | null;
+  /** `{{name}}` substitutions. Values of credential-looking names are kept in memory only. */
+  apiVariables: ApiVariable[];
+  savedRequests: ApiRequestDraft[];
+  /** Requests sent this session, newest first. */
+  apiHistory: ApiHistoryEntry[];
+  apiResult: ApiSendResult | null;
+  apiAssertionResults: AssertionResult[];
   isApiSending: boolean;
   setActiveRequest: (req: ApiRequestDraft) => void;
+  setApiVariables: (vars: ApiVariable[]) => void;
   sendActiveRequest: () => Promise<void>;
+  saveActiveRequest: () => void;
+  deleteSavedRequest: (id: string) => void;
   loadFromNetworkTransaction: (tx: NetworkTransaction) => void;
 
   /** Panels show the open website only; History shows everything captured before. */
@@ -123,6 +133,12 @@ interface AppState {
   connectCodebase: () => Promise<void>;
   /** Demo: break a service (bad deploy, crash or degrade) so there is something to investigate. */
   breakService: (service: string, kind: ChaosKind) => Promise<void>;
+  /** Which services my uncommitted changes touch, and what depends on them. */
+  sentinelImpact: ImpactResult | null;
+  /** Address -> service, from the last scan: matches what you browse to the map. */
+  sentinelAliases: Record<string, string>;
+  checkImpact: () => Promise<void>;
+  clearImpact: () => void;
   /** Demo: back to a healthy system. */
   restoreHealthy: () => Promise<void>;
   restoreSentinel: () => Promise<void>;
@@ -132,7 +148,6 @@ interface AppState {
   pollSentinelRun: () => Promise<void>;
   decideSentinelAction: (uid: string, approve: boolean) => Promise<void>;
   resolveSentinelUrl: (url: string) => Promise<SentinelResolution | null>;
-  executeTigerGraphQuery: (queryPath: string, method?: 'GET' | 'POST', body?: unknown) => Promise<void>;
 
   // AI Assistant
   aiMessages: ChatMessage[];
@@ -162,6 +177,42 @@ interface AppState {
   addToast: (toast: Omit<ToastMessage, 'id'>) => void;
   removeToast: (id: string) => void;
   triggerNuclearShred: () => Promise<void>;
+}
+
+export interface ApiHistoryEntry {
+  id: string;
+  at: number;
+  method: string;
+  url: string;
+  status: number;
+  durationMs: number;
+  error?: string;
+  draft: ApiRequestDraft;
+}
+
+const API_VARS_KEY = 'devbrowser.api.variables.v1';
+const API_SAVED_KEY = 'devbrowser.api.saved.v1';
+
+function readJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // storage unavailable: the session still works
+  }
+}
+
+export function newApiRequest(): ApiRequestDraft {
+  return { id: `req-${Date.now()}`, name: '', method: 'GET', url: '{{baseUrl}}/', headers: [], queryParams: [],
+    body: { mode: 'none' }, assertions: [] };
 }
 
 export const useAppStore = create<AppState>((set, get) => {
@@ -207,7 +258,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     // Network
     transactions: [],
-    selectedTransactionId: 'tx-101',
+    selectedTransactionId: null,
     networkSearchQuery: '',
     networkFilter: 'all',
     setSelectedTransactionId: (selectedTransactionId) => set({ selectedTransactionId }),
@@ -227,116 +278,61 @@ export const useAppStore = create<AppState>((set, get) => {
       });
     },
 
-    // API Client
-    activeRequest: {
-      id: 'req-draft-1',
-      name: 'Checkout POST Replay',
-      method: 'POST',
-      url: '{{baseUrl}}/api/v2/checkout',
-      headers: [
-        { key: 'Content-Type', value: 'application/json', enabled: true },
-        { key: 'Authorization', value: 'Bearer {{authToken}}', enabled: true }
-      ],
-      queryParams: [{ key: 'dryRun', value: 'false', enabled: false }],
-      body: {
-        mode: 'json',
-        raw: '{\n  "cartId": "cart_8831",\n  "paymentMethod": "pm_card_visa",\n  "total": 149.99\n}'
-      },
-      assertions: [
-        { id: 'as-1', name: 'Status is 200 OK', script: 'pm.response.to.have.status(200)', passed: true }
-      ]
-    },
-    environments: [
-      {
-        id: 'env-1',
-        name: 'Local Dev (Port 3000)',
-        variables: [
-          { id: 'v-1', key: 'baseUrl', value: 'http://localhost:3000', isSecret: false, enabled: true },
-          { id: 'v-2', key: 'authToken', value: 'dev_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9', isSecret: true, enabled: true }
-        ],
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      },
-      {
-        id: 'env-2',
-        name: 'Staging Cloud',
-        variables: [
-          { id: 'v-3', key: 'baseUrl', value: 'https://staging.internal.app', isSecret: false, enabled: true },
-          { id: 'v-4', key: 'authToken', value: 'stage_token_live', isSecret: true, enabled: true }
-        ],
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      }
-    ],
-    activeEnvironmentId: 'env-1',
-    collections: [
-      {
-        id: 'col-1',
-        name: 'E-Commerce Regression Suite',
-        description: 'End-to-end checkout and auth flows',
-        requests: [],
-        environmentVariables: [],
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      }
-    ],
-    apiResponse: null,
+    // API client: requests are really sent (from the main process); variables and saved requests persist on this machine.
+    activeRequest: newApiRequest(),
+    apiVariables: readJson<ApiVariable[]>(API_VARS_KEY, [{ key: 'baseUrl', value: 'http://localhost:3000' }]),
+    savedRequests: readJson<ApiRequestDraft[]>(API_SAVED_KEY, []),
+    apiHistory: [],
+    apiResult: null,
+    apiAssertionResults: [],
     isApiSending: false,
     setActiveRequest: (activeRequest) => set({ activeRequest }),
+    setApiVariables: (apiVariables) => {
+      set({ apiVariables });
+      writeJson(API_VARS_KEY, apiVariables.filter(v => !looksSecret(v.key)));
+    },
     sendActiveRequest: async () => {
-      set({ isApiSending: true });
-      const env = get().environments.find(e => e.id === get().activeEnvironmentId);
-      const baseUrl = env?.variables.find(v => v.key === 'baseUrl')?.value || 'http://localhost:3000';
-      const authToken = env?.variables.find(v => v.key === 'authToken')?.value || '';
-
-      setTimeout(() => {
-        set({
-          isApiSending: false,
-          apiResponse: {
-            status: 200,
-            statusText: 'OK',
-            durationMs: 38,
-            resolvedUrl: get().activeRequest.url.replace('{{baseUrl}}', baseUrl),
-            headers: {
-              'content-type': 'application/json; charset=utf-8',
-              'x-dev-browser-interpolated': 'true',
-              'x-auth-applied': authToken ? 'Bearer [REDACTED]' : 'None'
-            },
-            data: {
-              orderId: 'ord_' + Math.random().toString(36).substring(2, 9),
-              status: 'processed_successfully',
-              timestamp: new Date().toISOString(),
-              summary: 'Request executed in DevBrowser sandbox'
-            }
-          }
-        });
-        get().addToast({ type: 'success', title: 'API Request Completed', message: 'HTTP 200 OK (38ms)' });
-      }, 450);
+      if (!window.devBrowserAPI || get().isApiSending) return;
+      const draft = get().activeRequest;
+      const { request, missing } = buildSendRequest(draft, get().apiVariables);
+      if (!draft.url.trim()) return void get().addToast({ type: 'warning', title: 'Enter an address first' });
+      if (missing.length) {
+        return void get().addToast({ type: 'warning', title: 'Undefined variable',
+          message: `${missing.map(m => `{{${m}}}`).join(', ')}: add ${missing.length === 1 ? 'it' : 'them'} under Variables.` });
+      }
+      set({ isApiSending: true, apiResult: null, apiAssertionResults: [] });
+      const result = await window.devBrowserAPI.apiClient.send(request);
+      const entry: ApiHistoryEntry = { id: `h-${Date.now()}`, at: Date.now(), method: request.method, url: request.url,
+        status: result.status, durationMs: result.durationMs, error: result.error, draft };
+      set(state => ({ isApiSending: false, apiResult: result, apiHistory: [entry, ...state.apiHistory].slice(0, 25),
+        apiAssertionResults: evaluateAssertions(draft.assertions, result) }));
+    },
+    saveActiveRequest: () => {
+      const draft = get().activeRequest;
+      let redacted = false;
+      const headers = draft.headers.map(h => {
+        if (looksSecret(h.key) && h.value && !h.value.includes('{{')) {
+          redacted = true;
+          return { ...h, value: '' };
+        }
+        return h;
+      });
+      const saved = { ...draft, headers, name: draft.name.trim() || `${draft.method} ${draft.url}` };
+      const rest = get().savedRequests.filter(r => r.id !== saved.id);
+      const savedRequests = [saved, ...rest].slice(0, 100);
+      set({ savedRequests });
+      writeJson(API_SAVED_KEY, savedRequests);
+      get().addToast({ type: 'success', title: 'Request saved',
+        message: redacted ? 'Credentials in headers were not saved. Use a {{variable}} for them.' : saved.name });
+    },
+    deleteSavedRequest: (id) => {
+      const savedRequests = get().savedRequests.filter(r => r.id !== id);
+      set({ savedRequests });
+      writeJson(API_SAVED_KEY, savedRequests);
     },
     loadFromNetworkTransaction: (tx) => {
-      const draft: ApiRequestDraft = {
-        id: `draft-${Date.now()}`,
-        name: `${tx.method} ${tx.url.split('/').pop() || 'Request'}`,
-        method: tx.method as never,
-        url: tx.url,
-        headers: Object.entries(tx.requestHeaders).map(([key, value]) => ({
-          key,
-          value,
-          enabled: true
-        })),
-        queryParams: [],
-        body: {
-          mode: tx.requestBody ? 'json' : 'none',
-          raw: tx.requestBody
-        },
-        assertions: []
-      };
-      set({ activeRequest: draft, activeView: 'apiClient' });
-      get().addToast({
-        type: 'success',
-        title: 'Transaction Converted to API Client',
-        message: `${tx.method} ${tx.url}`
-      });
+      set({ activeRequest: draftFromTransaction(tx), apiResult: null, apiAssertionResults: [], activeView: 'apiClient' });
+      get().addToast({ type: 'success', title: 'Opened in the API client', message: `${tx.method} ${tx.url}` });
     },
 
     securityHistory: false,
@@ -375,49 +371,6 @@ export const useAppStore = create<AppState>((set, get) => {
     setSelectedNodeId: (selectedNodeId) => set({ selectedNodeId }),
     setActiveGraphTab: (activeGraphTab) => set({ activeGraphTab }),
     setGsqlQuery: (gsqlQuery) => set({ gsqlQuery }),
-    executeTigerGraphQuery: async (queryPath, method = 'GET', body) => {
-      set({ isGsqlExecuting: true });
-      try {
-        if (window.devBrowserAPI?.system) {
-          const res = await window.devBrowserAPI.system.executeTigerGraphQuery({
-            endpoint: get().tigerGraphEndpoint,
-            queryPath,
-            method,
-            secret: get().tigerGraphSecret,
-            body
-          });
-          set({ gsqlResult: res, isGsqlExecuting: false });
-          get().addToast({
-            type: res.ok ? 'success' : 'warning',
-            title: res.ok ? 'TigerGraph Query Succeeded' : 'TigerGraph Query Notice',
-            message: `${method} ${queryPath} (${res.durationMs}ms)`
-          });
-          return;
-        }
-      } catch (err) {
-        console.error('[TigerGraph] Query execution error:', err);
-      }
-
-      set({
-        isGsqlExecuting: false,
-        gsqlResult: {
-          ok: true,
-          status: 200,
-          durationMs: 14,
-          data: {
-            version: { edition: 'cloud-managed', api: 'v2' },
-            error: false,
-            message: 'In-Memory Topology Simulation Query Result',
-            results: get().graphNodes.map(n => ({ v_id: n.id, v_type: n.type, attributes: n.metadata }))
-          }
-        }
-      });
-      get().addToast({
-        type: 'info',
-        title: 'Query Simulated',
-        message: `${method} ${queryPath} (14ms)`
-      });
-    },
     sentinelUrl: 'http://localhost:8100',
     sentinelStatus: 'disconnected',
     sentinelMessage: 'Not connected',
@@ -451,10 +404,27 @@ export const useAppStore = create<AppState>((set, get) => {
           message: err instanceof Error ? err.message : String(err) });
       }
     },
-    breakService: async (service, kind) => {
+    sentinelImpact: null,
+    sentinelAliases: {},
+    clearImpact: () => set({ sentinelImpact: null }),
+    checkImpact: async () => {
       if (!window.devBrowserAPI || get().sentinelStatus !== 'connected') return;
       try {
-        const r = await window.devBrowserAPI.sentinel.breakService(service, kind);
+        const impact = await window.devBrowserAPI.sentinel.impact();
+        set({ sentinelImpact: impact, selectedNodeId: null });
+        if (!impact.changed.length) {
+          get().addToast({ type: 'info', title: 'Nothing to check', message: impact.files ? 'The changed files belong to no mapped service.' : 'No uncommitted changes in the connected project.' });
+        }
+      } catch (err) {
+        get().addToast({ type: 'warning', title: 'Could not check your changes', message: err instanceof Error ? err.message.replace(/^SentinelGraph [A-Z]+ \S+: HTTP \d+ /, '') : String(err) });
+      }
+    },
+    breakService: async (service, kind) => {
+      if (!window.devBrowserAPI || get().sentinelStatus !== 'connected') return;
+      // Something is already broken: add to it, so several failures can be tried together.
+      const additive = (get().sentinelSnapshot?.nodes ?? []).some(n => (n.type === 'Service' || n.type === 'Database') && n.status && n.status !== 'healthy');
+      try {
+        const r = await window.devBrowserAPI.sentinel.breakService(service, kind, additive);
         const who = r.alerting_services.length ? ` ${r.alerting_services.join(', ')} ${r.alerting_services.length === 1 ? 'is' : 'are'} alerting.` : '';
         get().addToast({ type: 'warning', title: `${service} is ${kind === 'degrade' ? 'degraded' : 'down'}`, message: `${who} Press Investigate.`.trim() });
         set({ sentinelRun: summarizeRun(null) });
@@ -489,6 +459,7 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!window.devBrowserAPI || get().sentinelStatus !== 'connected') return;
       try {
         const snapshot = await window.devBrowserAPI.sentinel.getGraph();
+        window.devBrowserAPI.sentinel.aliases().then(sentinelAliases => set({ sentinelAliases })).catch(() => undefined);
         const { nodes, edges } = toDevBrowserGraph(snapshot);
         set(state => ({
           sentinelSnapshot: snapshot,
@@ -542,7 +513,7 @@ export const useAppStore = create<AppState>((set, get) => {
           get().addToast({
             type: run.phase === 'done' ? 'success' : 'error',
             title: run.phase === 'done' ? 'Investigation Complete' : 'Investigation Failed',
-            message: run.rootCause ? `Root cause: ${run.rootCause}. ${run.proposed.length} action(s) await approval.`
+            message: run.rootCauses.length > 1 ? `${run.rootCauses.length} separate failures: ${run.rootCauses.join(', ')}. ${run.proposed.length} action(s) await approval.` : run.rootCause ? `Root cause: ${run.rootCause}. ${run.proposed.length} action(s) await approval.`
               : run.report ?? ''
           });
         }
@@ -575,7 +546,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
     calculateBlastRadiusForNode: (nodeId) => {
       const node = get().graphNodes.find(n => n.id === nodeId);
-      if (get().sentinelStatus === 'connected' && window.devBrowserAPI && node && node.type !== 'Database') {
+      if (get().sentinelStatus === 'connected' && window.devBrowserAPI && node && (node.type !== 'Database' || node.id.startsWith('svc:'))) {
         // A real traversal in TigerGraph (GSQL, up to 6 hops), not just the direct neighbours.
         window.devBrowserAPI.sentinel.blastRadius(node.name).then(res => {
           const blastRadius = toBlastRadius(nodeId, res, get().graphNodes);
@@ -621,6 +592,7 @@ export const useAppStore = create<AppState>((set, get) => {
         isAiGenerating: true
       }));
 
+      let reason = '';
       try {
         if (window.devBrowserAPI?.ai) {
           const selectedTx = get().selectedTransactionId
@@ -650,37 +622,24 @@ export const useAppStore = create<AppState>((set, get) => {
           return;
         }
       } catch (err) {
-        console.warn('[AI] Local inference error, using fallback:', err);
+        console.warn('[AI] local inference failed:', err);
+        reason = err instanceof Error ? err.message : String(err);
       }
 
-      // Offline / browser fallback
-      setTimeout(() => {
-        let responseText = '';
-        let diff: string | undefined = undefined;
-
-        if (promptText.toLowerCase().includes('security') || promptText.toLowerCase().includes('csp')) {
-          responseText = 'Identified missing Content-Security-Policy on localhost:3000. Here is an actionable configuration patch:';
-          diff = `// next.config.js\n module.exports = {\n+  async headers() {\n+    return [{\n+      source: '/(.*)',\n+      headers: [{ key: 'Content-Security-Policy', value: "default-src 'self'" }]\n+    }];\n+  }\n };`;
-        } else if (promptText.toLowerCase().includes('test') || promptText.toLowerCase().includes('playwright')) {
-          responseText = 'Generated automated Playwright regression test verifying the checkout workflow:';
-          diff = `// tests/checkout.spec.ts\n+import { test, expect } from '@playwright/test';\n+\n+test('verify cart checkout flow', async ({ page }) => {\n+  await page.goto('http://localhost:3000/cart');\n+  await page.click('[data-testid="checkout-btn"]');\n+  await expect(page.locator('.order-status')).toHaveText('confirmed');\n+});`;
-        } else {
-          responseText = `Analyzed application state for: "${promptText}". All network dependencies and DOM sinks are verified safe.`;
-        }
-
-        const assistantMsg: ChatMessage = {
+      // No canned answers: if the model cannot run, say so and say how to fix it.
+      const host = get().ollamaHost;
+      const model = get().selectedAiModel;
+      set(state => ({
+        aiMessages: [...state.aiMessages, {
           id: `ai-${Date.now()}`,
           sender: 'assistant',
-          text: responseText,
-          diff,
+          text: `I could not reach a local model, so I have not analysed anything.\n\n` +
+            `Start Ollama (\`ollama serve\`) and install the model (\`ollama pull ${model}\`), then ask again. ` +
+            `DevBrowser looks for it at the address in Settings, AI (${host} by default).` + (reason ? `\n\nDetail: ${reason}` : ''),
           timestamp: Date.now()
-        };
-
-        set(state => ({
-          aiMessages: [...state.aiMessages, assistantMsg],
-          isAiGenerating: false
-        }));
-      }, 600);
+        }],
+        isAiGenerating: false
+      }));
     },
     checkOllama: async () => {
       if (window.devBrowserAPI) {
@@ -725,7 +684,7 @@ export const useAppStore = create<AppState>((set, get) => {
       try {
         const result = window.devBrowserAPI ? await window.devBrowserAPI.privacy.triggerNuclearShred() : null;
         useBrowserStore.setState({ history: [], closed: [] });
-        set({ transactions: [], findings: [], apiResponse: null, selectedTransactionId: null });
+        set({ transactions: [], findings: [], apiResult: null, apiAssertionResults: [], apiHistory: [], selectedTransactionId: null });
         get().addToast({
           type: 'success',
           title: 'Browsing data cleared',

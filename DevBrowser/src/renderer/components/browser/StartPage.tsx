@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Keyboard, Network, Share2, ShieldAlert, Send } from 'lucide-react';
+import { Keyboard, Network, Share2, ShieldAlert, Send, Star, X } from 'lucide-react';
 import { displayUrl } from '../../../shared/domain/browser';
 import { navigate } from '../../browser/pages';
 import { useAppStore } from '../../store/useAppStore';
@@ -13,6 +13,8 @@ const MOD = mac ? '⌘' : 'Ctrl';
 /** A new tab: where to start, what is connected, and the sites visited most recently. */
 export const StartPage: React.FC<{ tabId: string }> = ({ tabId }) => {
   const history = useBrowserStore(s => s.history);
+  const bookmarks = useBrowserStore(s => s.bookmarks);
+  const removeBookmark = useBrowserStore(s => s.removeBookmark);
   const sentinel = useAppStore(s => s.sentinelStatus);
   const sentinelUrl = useAppStore(s => s.sentinelUrl);
   const setActiveView = useAppStore(s => s.setActiveView);
@@ -80,6 +82,24 @@ export const StartPage: React.FC<{ tabId: string }> = ({ tabId }) => {
           </Step>
         </section>
 
+        {bookmarks.length > 0 && (
+          <section aria-label="Bookmarks" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div className="section-label" style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}><Star size={11} /> Bookmarks</div>
+            {bookmarks.slice(0, 12).map(b => (
+              <div key={b.url} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button onClick={() => navigate(tabId, b.url)}
+                  style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 10, padding: '7px 10px', border: 0, borderRadius: 6,
+                    background: 'transparent', color: 'var(--text-primary)', textAlign: 'left', cursor: 'pointer' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                  <span style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>{b.title}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginLeft: 'auto', whiteSpace: 'nowrap' }}>{displayUrl(b.url)}</span>
+                </button>
+                <button className="icon-btn" aria-label={`Remove bookmark ${b.title}`} onClick={() => removeBookmark(b.url)} style={{ width: 22, height: 22 }}><X size={12} /></button>
+              </div>
+            ))}
+          </section>
+        )}
         {recent.length > 0 && (
           <section aria-label="Recent" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <div className="section-label" style={{ marginBottom: 6 }}>Recent</div>

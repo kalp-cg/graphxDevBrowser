@@ -36,6 +36,7 @@ function runCommand(command: BrowserCommand, arg?: string): void {
     case 'search': if (arg) browser.newTab(SEARCH_URL + encodeURIComponent(arg)); break;
     case 'close-tab': browser.closeTab(browser.activeId); break;
     case 'reopen-tab': browser.reopenTab(); break;
+    case 'bookmark': browser.toggleBookmarkOfActive(); break;
     case 'select-tab': browser.activateIndex(Number(arg)); break;
     case 'next-tab': browser.cycle(1); break;
     case 'prev-tab': browser.cycle(-1); break;

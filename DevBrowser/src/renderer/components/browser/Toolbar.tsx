@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowRight, Columns2, Info, Lock, PanelRight, RotateCw, SquareTerminal, Smartphone, TriangleAlert, X
+  ArrowLeft, ArrowRight, Columns2, Info, Lock, PanelRight, RotateCw, SquareTerminal, Smartphone, Star, TriangleAlert, X
 } from 'lucide-react';
-import { DEVICES, displayUrl, siteSecurity } from '../../../shared/domain/browser';
+import { canBookmark, DEVICES, displayUrl, isBookmarked, siteSecurity } from '../../../shared/domain/browser';
 import { emulate, goBack, goForward, navigate, reload, setZoom, stop, toggleDevTools } from '../../browser/pages';
 import { useBrowserStore } from '../../store/useBrowserStore';
 import { useAppStore } from '../../store/useAppStore';
@@ -13,6 +13,9 @@ export const Toolbar: React.FC = () => {
   const split = useBrowserStore(s => s.split);
   const toggleSplit = useBrowserStore(s => s.toggleSplit);
   const addressFocus = useBrowserStore(s => s.addressFocus);
+  const bookmarks = useBrowserStore(s => s.bookmarks);
+  const toggleBookmarkOfActive = useBrowserStore(s => s.toggleBookmarkOfActive);
+  const starred = !!tab && isBookmarked(bookmarks, tab.url);
   const activeView = useAppStore(s => s.activeView);
   const togglePanel = useAppStore(s => s.togglePanel);
   const [text, setText] = useState('');
@@ -101,6 +104,13 @@ export const Toolbar: React.FC = () => {
           style={{ flex: 1, minWidth: 0, border: 0, outline: 'none', background: 'transparent', color: 'var(--text-primary)',
             font: '13px var(--font-sans)' }}
         />
+        {canBookmark(tab.url) && (
+          <button type="button" className="icon-btn" aria-label={starred ? 'Remove bookmark' : 'Bookmark this page'} aria-pressed={starred}
+            title={`${starred ? 'Remove bookmark' : 'Bookmark this page'} (Cmd+D)`} onClick={toggleBookmarkOfActive}
+            style={{ width: 22, height: 22, color: starred ? 'var(--warn)' : 'var(--text-muted)' }}>
+            <Star size={14} fill={starred ? 'currentColor' : 'none'} />
+          </button>
+        )}
         {tab.zoom !== 1 && (
           <button type="button" className="tag" style={{ border: 0, cursor: 'pointer' }} title="Reset zoom (Cmd+0)"
             onClick={() => setZoom(tab.id, 1)}>

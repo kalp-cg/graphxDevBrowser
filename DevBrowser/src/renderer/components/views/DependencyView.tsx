@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Crosshair, FolderGit2, RefreshCw, RotateCcw, ShieldAlert } from 'lucide-react';
+import { Crosshair, ExternalLink, FlaskConical, FolderGit2, GitCompareArrows, Radio, RefreshCw, RotateCcw, ShieldAlert } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
-import { InvestigationPanel } from '../common/SentinelPanels';
+import { ImpactPanel, InvestigationPanel, LiveDataPanel, SandboxPanel } from '../common/SentinelPanels';
 import { GraphCanvas, type GraphHighlight } from '../graph/GraphCanvas';
-import type { ChaosKind, SentinelNode } from '../../../shared/domain/sentinel';
+import type { NetworkTransaction } from '../../../shared/domain/network';
+import { useBrowserStore } from '../../store/useBrowserStore';
+import { localAddressesOf, serviceOfUrl, type ChaosKind, type SentinelNode } from '../../../shared/domain/sentinel';
 
 const REFRESH_MS = 5000;
 const EMPTY = new Set<string>();
@@ -23,10 +25,18 @@ export const DependencyView: React.FC = () => {
   const setActiveView = useAppStore(s => s.setActiveView);
   const connectCodebase = useAppStore(s => s.connectCodebase);
   const breakService = useAppStore(s => s.breakService);
+  const impact = useAppStore(s => s.sentinelImpact);
+  const aliases = useAppStore(s => s.sentinelAliases);
+  const transactions = useAppStore(s => s.transactions);
+  const setNetworkSearchQuery = useAppStore(s => s.setNetworkSearchQuery);
+  const setNetworkHistory = useAppStore(s => s.setNetworkHistory);
+  const checkImpact = useAppStore(s => s.checkImpact);
   const restoreHealthy = useAppStore(s => s.restoreHealthy);
   const theme = useAppStore(s => s.theme);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showContext, setShowContext] = useState(false);
+  const [showLive, setShowLive] = useState(false);
+  const [showSandbox, setShowSandbox] = useState(false);
   const [fitKey, setFitKey] = useState(0);
 
   // Live while the panel is open (the dashboard streams over a WebSocket; this polls).
@@ -39,7 +49,9 @@ export const DependencyView: React.FC = () => {
 
   const nodes = snapshot?.nodes ?? [];
   const services = nodes.filter(n => n.type === 'Service');
-  const unhealthy = services.filter(n => n.status && n.status !== 'healthy');
+  // A database is a node that can fail too; it is not counted among the services.
+  const databases = nodes.filter(n => n.type === 'Database' && n.id.startsWith('svc:'));
+  const unhealthy = [...services, ...databases].filter(n => n.status && n.status !== 'healthy');
   const alerts = nodes.filter(n => n.type === 'Alert').length;
   const selected = nodes.find(n => n.id === selectedId) ?? null;
 
@@ -49,6 +61,11 @@ export const DependencyView: React.FC = () => {
       return { tone: 'accent', nodes: new Set(run.path.nodes), edges: new Set(run.path.edges),
         currentNodes: new Set(run.path.currentNodes), currentEdges: new Set(run.path.currentEdges) };
     }
+    if (impact?.changed.length) {
+      const ids = new Set([...impact.changed, ...impact.affected].map(x => `svc:${x.name}`));
+      const edges = new Set((snapshot?.links ?? []).filter(l => l.type === 'DEPENDS_ON' && ids.has(l.source) && ids.has(l.target)).map(l => l.id));
+      return { tone: 'danger', nodes: ids, edges, currentNodes: new Set(impact.changed.map(c => `svc:${c.name}`)), currentEdges: EMPTY };
+    }
     if (blast && blast.rootNodeId === selectedId) {
       const ids = new Set([blast.rootNodeId, ...blast.affectedNodes.map(n => n.id)]);
       const edges = new Set((snapshot?.links ?? [])
@@ -56,7 +73,7 @@ export const DependencyView: React.FC = () => {
       return { tone: 'danger', nodes: ids, edges, currentNodes: new Set([blast.rootNodeId]), currentEdges: EMPTY };
     }
     return { tone: 'accent', nodes: EMPTY, edges: EMPTY, currentNodes: EMPTY, currentEdges: EMPTY };
-  }, [run, blast, selectedId, snapshot]);
+  }, [run, blast, selectedId, snapshot, impact]);
 
   if (status !== 'connected') {
     return (
@@ -92,11 +109,11 @@ export const DependencyView: React.FC = () => {
         <input className="field" list="sentinel-services" aria-label="Find a service" placeholder="Find a service…"
           style={{ width: 150, flex: '0 1 150px', minWidth: 90 }}
           onChange={e => {
-            const hit = services.find(s => (s.name ?? s.label) === e.target.value.trim());
+            const hit = [...services, ...databases].find(s => (s.name ?? s.label) === e.target.value.trim());
             if (hit) setSelectedId(hit.id);
           }} />
         <datalist id="sentinel-services">
-          {services.map(s => <option key={s.id} value={s.name ?? s.label} />)}
+          {[...services, ...databases].map(s => <option key={s.id} value={s.name ?? s.label} />)}
         </datalist>
         <div style={{ flex: 1 }} />
         <button className="btn" title="Pick your repository: add its services and dependencies to the graph"
@@ -122,6 +139,21 @@ export const DependencyView: React.FC = () => {
             Restore healthy
           </button>
         )}
+        <button className="btn" title="Load a 38-service test company and check whether the agent finds what we break in it" aria-pressed={showSandbox}
+          onClick={() => setShowSandbox(v => !v)}>
+          <FlaskConical size={13} />
+          Sandbox test
+        </button>
+        <button className="btn" title="Send the map real traces and alerts: the configuration for this server" aria-pressed={showLive}
+          onClick={() => setShowLive(v => !v)}>
+          <Radio size={13} />
+          Live data
+        </button>
+        <button className="btn" title="Which services do my uncommitted changes affect, and what depends on them?"
+          onClick={() => void checkImpact()}>
+          <GitCompareArrows size={13} />
+          Check my changes
+        </button>
         <button className={`btn${alerts ? ' danger' : ''}`} disabled={run.phase === 'running'}
           onClick={() => void investigate()}>
           <ShieldAlert size={13} />
@@ -137,9 +169,12 @@ export const DependencyView: React.FC = () => {
           )}
           <Legend />
         </div>
-        {(selected || run.phase !== 'idle') && (
+        {(selected || run.phase !== 'idle' || impact?.changed.length || showLive || showSandbox) && (
           <aside style={{ width: 280, maxWidth: '45%', minWidth: 200, flexShrink: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12,
             padding: 12, borderLeft: '1px solid var(--border-subtle)' }}>
+            {showSandbox && <SandboxPanel onClose={() => setShowSandbox(false)} onChanged={() => { void refresh(); setFitKey(k => k + 1); }} />}
+            {showLive && <LiveDataPanel onClose={() => setShowLive(false)} />}
+            <ImpactPanel onSelect={name => setSelectedId(`svc:${name}`)} />
             <InvestigationPanel />
             {selected && (
               <Inspector node={selected} blastCount={blast?.rootNodeId === selected.id ? blast.affectedNodes.length : null}
@@ -147,6 +182,10 @@ export const DependencyView: React.FC = () => {
                 onInvestigate={() => void investigate(
                   `${selected.name ?? selected.label} is failing. Find the root cause and propose a fix.`)}
                 onBreak={kind => void breakService(selected.name ?? selected.label, kind)}
+                traffic={transactions.filter(t => serviceOfUrl(t.url, aliases) === (selected.name ?? selected.label))}
+                addresses={localAddressesOf(selected.name ?? selected.label, aliases)}
+                onOpen={address => useBrowserStore.getState().newTab(`http://${address}`)}
+                onShowTraffic={() => { setNetworkHistory(true); setNetworkSearchQuery(Object.keys(aliases).find(a => aliases[a] === (selected.name ?? selected.label) && a.startsWith('localhost')) ?? ''); setActiveView('network'); }}
                 running={run.phase === 'running'} />
             )}
           </aside>
@@ -157,7 +196,8 @@ export const DependencyView: React.FC = () => {
 };
 
 const Inspector: React.FC<{ node: SentinelNode; blastCount: number | null; onBlast: () => void; onInvestigate: () => void;
-  onBreak: (kind: ChaosKind) => void; running: boolean }> = ({ node, blastCount, onBlast, onInvestigate, onBreak, running }) => {
+  onBreak: (kind: ChaosKind) => void; running: boolean; traffic: NetworkTransaction[]; addresses: string[];
+  onOpen: (address: string) => void; onShowTraffic: () => void }> = ({ node, blastCount, onBlast, onInvestigate, onBreak, running, traffic, addresses, onOpen, onShowTraffic }) => {
   const rows: [string, React.ReactNode][] = [
     ['Type', node.type],
     ['Status', node.status ? <span className={`tag${node.status === 'down' ? ' danger' : node.status === 'degraded' ? ' warn' : ''}`}>{node.status}</span> : null],
@@ -170,7 +210,7 @@ const Inspector: React.FC<{ node: SentinelNode; blastCount: number | null; onBla
     ['Change', node.change_summary ?? (node.type === 'Commit' ? node.message : undefined)],
     ['Metric', node.metric ? `${node.metric} = ${node.value} (threshold ${node.threshold})` : undefined]
   ];
-  const isService = node.type === 'Service';
+  const isService = node.type === 'Service' || (node.type === 'Database' && node.id.startsWith('svc:'));
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div>
@@ -195,6 +235,33 @@ const Inspector: React.FC<{ node: SentinelNode; blastCount: number | null; onBla
             </div>
           )}
           <button className="btn" disabled={running} onClick={onInvestigate}>Investigate this service</button>
+          {addresses.length > 0 && (
+            <button className="btn" onClick={() => onOpen(addresses[0]!)} title={`Open http://${addresses[0]} in a new tab`}>
+              <ExternalLink size={13} /> Open {addresses[0]}
+            </button>
+          )}
+          <div className="section-label" style={{ marginTop: 6 }}>Seen in your browsing</div>
+          {traffic.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              No request to this service yet. Browse the app in a tab and its calls appear here.
+            </div>
+          ) : (
+            <div aria-label="Traffic to this service" style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 12 }}>
+              <div style={{ color: 'var(--text-secondary)' }}>
+                {traffic.length} request{traffic.length === 1 ? '' : 's'}
+                {traffic.some(t => !t.statusCode || t.statusCode >= 500) &&
+                  <strong style={{ color: 'var(--danger)' }}> · {traffic.filter(t => !t.statusCode || t.statusCode >= 500).length} failed</strong>}
+              </div>
+              {traffic.slice(0, 5).map(t => (
+                <div key={t.id} style={{ display: 'flex', gap: 6, fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+                  <span style={{ color: !t.statusCode || t.statusCode >= 500 ? 'var(--danger)' : t.statusCode >= 400 ? 'var(--warn)' : 'var(--text-muted)' }}>{t.statusCode || 'ERR'}</span>
+                  <span style={{ color: 'var(--text-secondary)' }}>{t.method}</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{(() => { try { return new URL(t.url).pathname; } catch { return t.url; } })()}</span>
+                </div>
+              ))}
+              <button className="btn" style={{ alignSelf: 'flex-start', marginTop: 2 }} onClick={onShowTraffic}>Open in Network</button>
+            </div>
+          )}
           <div className="section-label" style={{ marginTop: 6 }} title="Simulated in the graph: nothing real is touched">Simulate a failure</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <button className="btn danger" disabled={running} onClick={() => onBreak('deploy')}>Ship a bad deploy</button>

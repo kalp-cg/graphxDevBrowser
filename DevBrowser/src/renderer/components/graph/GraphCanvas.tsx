@@ -59,7 +59,7 @@ const endId = (end: L['source']) => (typeof end === 'object' && end ? String((en
 
 function radius(n: N): number {
   if (n.type === 'Service') return 5.5 + 22 * Math.sqrt(n.pagerank ?? 0.01);
-  if (n.type === 'Database') return 5;
+  if (n.type === 'Database') return 6.5;
   if (n.type === 'Incident' || n.type === 'Deployment') return 4.5;
   return 3.5;
 }

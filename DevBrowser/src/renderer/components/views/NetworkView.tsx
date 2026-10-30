@@ -13,6 +13,10 @@ import { InvestigationPanel, ServiceContextCard } from '../common/SentinelPanels
 import { EmptyState } from '../common/EmptyState';
 import { SiteScope } from '../common/SiteScope';
 import { forSite, siteOf } from '../../../shared/domain/browser';
+import { timingPhases, toHar } from '../../../shared/domain/network';
+import { THROTTLES } from '../../../shared/domain/browser';
+import { useBrowserStore } from '../../store/useBrowserStore';
+import { setThrottle } from '../../browser/pages';
 
 export const NetworkView: React.FC = () => {
   const allTransactions = useAppStore(s => s.transactions);
@@ -31,6 +35,22 @@ export const NetworkView: React.FC = () => {
   const resizablePanelHeight = useAppStore(s => s.resizablePanelHeight);
   const setResizablePanelHeight = useAppStore(s => s.setResizablePanelHeight);
   const addToast = useAppStore(s => s.addToast);
+
+  const activeTab = useBrowserStore(s => s.tabs.find(t => t.id === s.activeId));
+  const throttle = activeTab?.throttle ?? 'none';
+
+  const exportHar = (bodies: boolean) => {
+    if (bodies && !confirm('Bodies can contain passwords or tokens that nothing can find and remove for you. Include them?')) return;
+    const har = toHar(filteredTransactions, { bodies, version: __APP_VERSION__ });
+    const url = URL.createObjectURL(new Blob([JSON.stringify(har, null, 2)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `devbrowser-${new Date().toISOString().replace(/[:.]/g, '-')}.har`;
+    a.click();
+    URL.revokeObjectURL(url);
+    addToast({ type: 'success', title: `Exported ${filteredTransactions.length} request${filteredTransactions.length === 1 ? '' : 's'}`,
+      message: bodies ? 'HAR with bodies. Credentials in headers and query strings were removed; bodies were not scrubbed.' : 'HAR without bodies. Credentials were removed.' });
+  };
 
   const [activeDetailTab, setActiveDetailTab] = useState<'headers' | 'payload' | 'response' | 'timing'>('headers');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -141,7 +161,16 @@ export const NetworkView: React.FC = () => {
           <SiteScope history={history} onChange={setHistory} currentUrl={currentUrl} site={siteOf(currentUrl)} total={allTransactions.length} />
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <select className="field" aria-label="Network throttling" value={throttle} style={{ height: 24, fontSize: 11, color: throttle === 'none' ? undefined : 'var(--warn)' }}
+            title="Slow or cut this page's network, like DevTools. Reload the page to see the effect."
+            onChange={e => void setThrottle(activeTab?.id ?? '', e.target.value)} disabled={!activeTab}>
+            {THROTTLES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+          </select>
+          <button className="btn" style={{ height: 24, fontSize: 11 }} disabled={!filteredTransactions.length} onClick={() => exportHar(false)}
+            title="Save what is listed as a HAR file. Credentials are removed.">HAR</button>
+          <button className="btn" style={{ height: 24, fontSize: 11 }} disabled={!filteredTransactions.length} onClick={() => exportHar(true)}
+            title="HAR including request and response bodies (not scrubbed)">HAR + bodies</button>
           <button
             onClick={clearTransactions}
             title="Clear Network Stream"
@@ -239,13 +268,13 @@ export const NetworkView: React.FC = () => {
                       {tx.mimeType || 'unknown'}
                     </td>
                     <td style={{ padding: '6px 10px', color: 'var(--text-muted)' }}>
-                      {tx.protocol || 'http/1.1'}
+                      {tx.protocol || '-'}
                     </td>
                     <td style={{ padding: '6px 10px', color: 'var(--text-muted)' }}>
                       {tx.encodedBodyLength ? `${Math.round(tx.encodedBodyLength / 1024 * 10) / 10} KB` : '-'}
                     </td>
                     <td style={{ padding: '6px 10px', color: 'var(--text-muted)' }}>
-                      {tx.endTime && tx.startTime ? `${tx.endTime - tx.startTime}ms` : '38ms'}
+                      {tx.endTime && tx.startTime ? `${tx.endTime - tx.startTime} ms` : '-'}
                     </td>
                   </tr>
                 );
@@ -425,20 +454,35 @@ export const NetworkView: React.FC = () => {
               </div>
             )}
 
-            {activeDetailTab === 'timing' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)' }}>
-                  TIMING BREAKDOWN WATERFALL
+            {activeDetailTab === 'timing' && (() => {
+              const t = timingPhases(selectedTx);
+              const total = t?.total || (selectedTx.endTime && selectedTx.startTime ? selectedTx.endTime - selectedTx.startTime : 0);
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>
+                    TIMING{total ? `: ${Math.round(total)} ms in total` : ''}
+                  </div>
+                  {!t ? (
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                      The browser reported no phases for this request (it came from the cache, or has no network step).
+                    </div>
+                  ) : (
+                    <div style={{ background: 'var(--bg-surface)', padding: 10, borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {t.phases.map(p => (
+                        <div key={p.label} style={{ display: 'grid', gridTemplateColumns: '170px 1fr 70px', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                          <span>{p.label}</span>
+                          <span style={{ position: 'relative', height: 8, borderRadius: 4, background: 'var(--bg-tertiary)' }}>
+                            <span style={{ position: 'absolute', top: 0, bottom: 0, borderRadius: 4, background: 'var(--accent)',
+                              left: `${(p.start / t.total) * 100}%`, width: `${Math.max((p.duration / t.total) * 100, 1)}%` }} />
+                          </span>
+                          <span style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{p.duration.toFixed(p.duration < 10 ? 1 : 0)} ms</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div style={{ background: 'var(--bg-surface)', padding: '10px', borderRadius: '6px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <div><strong>DNS Resolution:</strong> 2.4 ms</div>
-                  <div><strong>TCP Connection:</strong> 8.1 ms</div>
-                  <div><strong>SSL Handshake:</strong> 12.0 ms</div>
-                  <div><strong>TTFB (Time to First Byte):</strong> 38.2 ms</div>
-                  <div><strong>Content Download:</strong> 4.1 ms</div>
-                </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </div>
       )}
