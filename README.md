@@ -194,6 +194,52 @@ DevBrowser (`DevBrowser/`) is an Electron desktop runtime that brings TigerGraph
 
 ---
 
+## 🧪 Try It Live in 2 Minutes (no cloud account)
+
+```bash
+cd backend && python -m venv .venv && .venv/bin/pip install -r requirements.txt && cd ..
+backend/.venv/bin/python sandbox/run.py up        # API + a live microservice shop + traffic
+backend/.venv/bin/python sandbox/run.py demo      # break inventory, investigate, approve rollback, verify
+```
+
+The [sandbox](sandbox/README.md) runs the whole product on your machine: a real 7-service shop sending
+OpenTelemetry traces, the agent, real (sandboxed) rollbacks, and DevBrowser on top. SentinelGraph runs on its
+embedded graph engine there (`GRAPH_BACKEND=local`, see below), so it needs no TigerGraph, LLM key or Docker.
+
+## 🗺️ Point It at Your Codebase
+
+```bash
+python -m sentinel.ingest codebase /path/to/your/repo              # writes the graph directly
+python -m sentinel.ingest codebase . --push https://sentinel.example.com   # or sends it to a running API
+```
+
+The scan reads what the repository already declares: services, datastores and dependencies from Docker Compose
+(`depends_on` and service URLs in the environment), owners from `CODEOWNERS`, language from each build context,
+tier/revenue/layer from compose labels (`sentinel.tier: critical`), and recent changes from git. It also records
+every address each service answers on, so traffic DevBrowser captures to `localhost:7404` lands on the same
+`checkout` vertex as its traces and its code. Re-scanning never resets runtime health. Without a compose file,
+each package directory (`services/*`, `apps/*`, ...) becomes a service and traces fill in the dependencies.
+
+## 🔌 How DevBrowser and SentinelGraph Work Together
+
+| In DevBrowser | What SentinelGraph does |
+| :--- | :--- |
+| Browse your app | Captured API calls become dependencies (`POST /api/browser-traffic`). Topology only: a developer clicking around never changes health or pages anyone. |
+| Select a request in the Network panel | `GET /api/resolve?url=`: the service behind it, owner team, on-call, health, blast radius, recent changes. |
+| **Investigate this failure** on a 5xx | `POST /api/runs` with the request as evidence: it becomes a health signal, and the agent starts from it but follows the graph to the real origin. |
+| Watch the run, **Approve** / **Reject** | `GET /api/runs/current` (scoped to the run), `POST /api/actions/{uid}/approve`. |
+| Restart the app | The connection is restored; the admin token is stored only keychain-encrypted (`safeStorage`). |
+
+## ⚙️ Graph Engines
+
+| `GRAPH_BACKEND` | Use | Notes |
+| :--- | :--- | :--- |
+| `tigergraph` (default when `TG_HOST` is set) | Teams, production | Multi-hop GSQL on TigerGraph Cloud or self-hosted. |
+| `local` (default otherwise) | Sandbox, single developer, CI | `sentinel/localgraph.py`: the same pyTigerGraph calls and all 15 GSQL queries in Python, file-backed (`LOCAL_GRAPH_DIR`) so the API and the agent's MCP subprocess share it. Sized for one team's topology. A test fails if a GSQL query has no local implementation. |
+
+Trace health fails fast and recovers slowly: an alert resolves only after the service has looked healthy for
+`OTEL_RECOVERY_MS` (15 s), so one lucky window in a noisy stream doesn't close an incident.
+
 ## 🚀 Getting Started
 
 ### Prerequisites
@@ -301,11 +347,18 @@ curl -X POST http://localhost:8100/api/changes \
 
 ## 🧪 Testing
 
-### Backend Unit & Integration Tests (pytest against TigerGraph)
+### Backend Unit & Integration Tests (pytest)
 ```bash
 cd backend
-source .venv/bin/activate
-python -m pytest tests/test_db.py tests/test_actions.py tests/test_api.py -v
+GRAPH_BACKEND=local .venv/bin/python -m pytest -q          # hermetic, ~20 s (what every PR runs)
+GRAPH_BACKEND=tigergraph .venv/bin/python -m pytest -q     # against TigerGraph (graph Sentinel_test), ~15 min
+```
+
+### Live Sandbox (the product end to end)
+```bash
+backend/.venv/bin/python sandbox/run.py up &
+for s in web gateway catalog cart checkout payments inventory; do backend/.venv/bin/python sandbox/run.py demo $s; done
+cd DevBrowser && SENTINEL_SANDBOX=1 SENTINEL_URL=http://localhost:8200 SENTINEL_ADMIN_TOKEN=sandbox-token npx vitest run
 ```
 
 ### DevBrowser Unit & Integration Tests (vitest)
@@ -321,7 +374,7 @@ npm test
 cd e2e
 npm install
 npx playwright install chromium
-ADMIN_TOKEN=dev-admin-token npx playwright test
+ADMIN_TOKEN=dev-admin-token npx playwright test   # against a running API (:8100) + dashboard (:3001)
 ```
 
 ---
@@ -350,6 +403,7 @@ graphxDevBrowser/
 │   ├── src/preload/          # Safe API bridge for renderer
 │   ├── src/renderer/         # React UI, Dependency View, Traffic Inspector
 │   └── tests/                # Vitest unit & integration test suites
+├── sandbox/                  # Live sandbox: a traced 7-service shop + one-command launcher and checks
 ├── e2e/                      # Playwright End-to-End test suites
 ├── docs/                     # Architecture diagrams, demo scripts, blog posts
 ├── docker-compose.yml        # Multi-container orchestration

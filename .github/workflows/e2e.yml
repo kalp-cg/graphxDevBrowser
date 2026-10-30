@@ -5,16 +5,14 @@ on:
     branches: [main]
   pull_request:
 
-# Real end-to-end: browser -> Next.js -> FastAPI (+ WebSocket) -> MCP server -> TigerGraph. No mocks.
-# Uses its own graph on the TigerGraph Cloud instance from the repo secrets.
-concurrency: tigergraph-e2e-graph
-
+# Real end-to-end: browser -> Next.js -> FastAPI (+ WebSocket) -> MCP server -> graph. No mocks.
+# The graph is the embedded engine (same tools, same GSQL semantics; the backend suite checks parity), so every
+# PR, including forks without secrets, runs it. The backend suite covers TigerGraph itself on main and nightly.
 jobs:
   e2e:
     runs-on: ubuntu-latest
     env:
-      TG_HOST: ${{ secrets.TG_HOST }}
-      TG_SECRET: ${{ secrets.TG_SECRET }}
+      GRAPH_BACKEND: local
       TG_GRAPH: Sentinel_e2e
       LLM_PROVIDER: autopilot
       ADMIN_TOKEN: ci-admin-token

@@ -1,0 +1,8 @@
+# Ownership: SentinelGraph turns these into Team -OWNS-> Service edges.
+/services/web/        @sandbox-shop/storefront
+/services/gateway/    @sandbox-shop/platform
+/services/catalog/    @sandbox-shop/storefront
+/services/cart/       @sandbox-shop/storefront
+/services/checkout/   @sandbox-shop/payments
+/services/payments/   @sandbox-shop/payments
+/services/inventory/  @sandbox-shop/fulfilment

@@ -4,11 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "0 3 * * *" # nightly: the backend suite against real TigerGraph too
 
-# The graph tests run against a TigerGraph Cloud instance (graph Sentinel_test), set in the repo secrets
-# TG_HOST and TG_SECRET. Runs share that graph, so they never overlap.
-concurrency: tigergraph-test-graph
-
+# Every PR runs hermetically: the backend on the embedded graph engine (sentinel/localgraph.py, parity with every
+# GSQL query is itself a test), DevBrowser and the dashboard, and the live sandbox loop. The same backend suite
+# runs against TigerGraph Cloud (graph Sentinel_test) on main and nightly, where the repo secrets exist.
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -25,5 +26,95 @@ jobs:
       - run: pip install -r requirements.txt
       - run: pytest -q
         env:
+          GRAPH_BACKEND: local
+
+  backend-tigergraph:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency: tigergraph-test-graph # runs share that graph, so they never overlap
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: pytest -q
+        env:
+          GRAPH_BACKEND: tigergraph
           TG_HOST: ${{ secrets.TG_HOST }}
           TG_SECRET: ${{ secrets.TG_SECRET }}
+
+  devbrowser:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: DevBrowser
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: DevBrowser/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  # The product end to end on a live system: codebase scan -> real traces -> alerts -> agent -> approved
+  # rollback that really changes the running shop -> recovery -> memory; then the same loop driven by
+  # DevBrowser's own client code.
+  sandbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the codebase scan reads git history
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: DevBrowser/package-lock.json
+      - run: pip install -r backend/requirements.txt
+      - name: Start the sandbox
+        run: |
+          nohup python sandbox/run.py up > sandbox.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf localhost:7499/__control && exit 0; sleep 1; done
+          cat sandbox.log; exit 1
+      - name: Break and fix every service, then a repeat (recalled from incident memory)
+        run: for s in web gateway catalog cart checkout payments inventory inventory; do python sandbox/run.py demo $s; done
+      - name: DevBrowser client against the sandbox
+        working-directory: DevBrowser
+        run: |
+          npm ci
+          SENTINEL_SANDBOX=1 SENTINEL_URL=http://localhost:8200 SENTINEL_ADMIN_TOKEN=sandbox-token \
+            npx vitest run tests/unit/sandbox-live.test.ts tests/unit/sentinel-live.test.ts
+      - if: failure()
+        run: tail -100 sandbox.log
