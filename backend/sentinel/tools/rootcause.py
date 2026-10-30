@@ -1,9 +1,18 @@
 """Root-cause tools: what do the failing services share, and what changed there recently."""
 from ..db import Graph, flat, run
 from .common import capped, check_services, clamp, graph_or_default, now_ms, result
-from .read import path_edges, reach, reach_gsql
+from .read import firing_alerts, path_edges, reach, reach_gsql
 
 MAX_HOPS = 5
+
+def onsets(g: Graph) -> dict[str, int]:
+    """service -> when its earliest firing alert began (ms). Absent: no alert of its own."""
+    out: dict[str, int] = {}
+    for a in firing_alerts(g):
+        name = a.get("service") or a.get("@service")
+        if name:
+            out[name] = min(out.get(name, a["at"]), a["at"])
+    return out
 
 
 def unhealthy_names(g: Graph) -> list[str]:
@@ -79,13 +88,24 @@ def find_root_causes(services: list[str], graph: Graph | None = None) -> dict:
     if err := check_services(g, names):
         return err
     below = reach(g, unhealthy_names(g), "up", MAX_HOPS)
+    began = onsets(g)
+
+    def explained(name: str) -> bool:
+        """Is `name` itself a symptom of something unhealthy beneath it? A loop of services that call each other does not count (each
+        is "beneath" the other)."""
+        for src, h in below.get(name, {}).get("dist", {}).items():
+            if h <= 0 or name in below.get(src, {}).get("dist", {}):
+                continue
+            return True
+        return False
+
     roots: dict[str, dict] = {}
     node_uids = [f"svc:{n}" for n in names]
     edge_uids: list[str] = []
     for n in names:
         down = reach(g, [n], "down", MAX_HOPS)
         for name, d in down.items():
-            if d["status"] == "healthy" or sum(1 for _s, h in below.get(name, {}).get("dist", {}).items() if h > 0):
+            if d["status"] == "healthy" or explained(name):
                 continue  # healthy, or itself explained by something unhealthy beneath it
             r = roots.setdefault(name, {"name": name, "uid": d["uid"], "status": d["status"], "tier": d["tier"],
                                         "explains": [], "likely_root_cause": True})
@@ -93,7 +113,12 @@ def find_root_causes(services: list[str], graph: Graph | None = None) -> dict:
             path = path_edges(down, n, name, "down")
             edge_uids += path
             node_uids += [f"svc:{e.split('->')[1]}" for e in path]
-    ranked = sorted(roots.values(), key=lambda r: (-len(r["explains"]), r["status"] != "down", r["name"]))
+    # The one that explains the most alerting services first; among equals, the one that began earliest: a cause starts before its
+    # symptoms do. (A service with no alert of its own, only a status, counts as earliest.)
+    ranked = sorted(roots.values(), key=lambda r: (-len(r["explains"]), r["status"] != "down", began.get(r["name"], 0), r["name"]))
+    for r in ranked:
+        if r["name"] in began:
+            r["began_at"] = began[r["name"]]
     independent = len(ranked) > 1
     return result({"services": names, "roots": ranked, "independent": independent}, reach_gsql("down"),
                   node_uids + [r["uid"] for r in ranked], edge_uids)

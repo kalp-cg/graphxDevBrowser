@@ -218,11 +218,11 @@ def write(graph: Graph, found: dict[str, Any], kind: str = "service", at: int | 
     firing = [uid for uid, c in alert_uids.items() if c.status != "healthy"] if health else []
     if health:
         upsert(batch, "Alert", [
-            ({"uid": uid, "id": uid.removeprefix("alert:"), "metric": "p90_latency_ms", "value": round(c.p90_ms or 0, 1),
-              "threshold": round(baselines.scale(normal[c.name])[0], 1), "at": at, "status": "firing", "scenario": "otel"}
+            ({"uid": uid, "id": uid.removeprefix("alert:"), "metric": "p90_latency_ms",
+              "value": round(baselines.z(c.p90_ms or 0, normal[c.name]), 1), "threshold": SLOW_Z, "at": firing_at.get(uid, at), "status": "firing", "scenario": "otel"}
              if c.slow and c.error_rate < ERROR_RATE else
              {"uid": uid, "id": uid.removeprefix("alert:"), "metric": "error_rate", "value": round(c.error_rate, 3),
-              "threshold": ERROR_RATE, "at": at, "status": "firing", "scenario": "otel"})
+              "threshold": ERROR_RATE, "at": firing_at.get(uid, at), "status": "firing", "scenario": "otel"})
             for uid, c in alert_uids.items() if uid in firing
         ] + [{"uid": uid, "status": "resolved"} for uid in firing_at
              if uid in alert_uids and uid not in firing and uid not in holding])

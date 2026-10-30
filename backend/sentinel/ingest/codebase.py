@@ -27,7 +27,7 @@ from typing import Any
 import yaml
 
 from ..db import Batch, Graph, link, upsert
-from .modules import scan_modules
+from .modules import dominant_language, scan_modules
 from .otel import record_change
 
 COMPOSE_FILES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
@@ -39,7 +39,11 @@ LANGUAGES = (("package.json", "javascript"), ("tsconfig.json", "typescript"), ("
              ("requirements.txt", "python"), ("go.mod", "go"), ("pom.xml", "java"), ("build.gradle", "java"),
              ("build.gradle.kts", "java"), ("Cargo.toml", "rust"), ("Gemfile", "ruby"), ("composer.json", "php"),
              ("mix.exs", "elixir"), ("CMakeLists.txt", "cpp"), ("*.csproj", "csharp"), ("*.fsproj", "fsharp"),
-             ("*.slnx", "csharp"), ("*.sln", "csharp"), ("Directory.Build.props", "csharp"))
+             ("*.slnx", "csharp"), ("*.sln", "csharp"), ("Directory.Build.props", "csharp"), ("Package.swift", "swift"),
+             ("*.xcodeproj", "swift"), ("*.xcworkspace", "swift"), ("Podfile", "swift"), ("pubspec.yaml", "dart"),
+             ("build.sbt", "scala"), ("setup.py", "python"), ("Pipfile", "python"), ("deno.json", "typescript"),
+             ("stack.yaml", "haskell"), ("project.clj", "clojure"), ("settings.gradle", "java"), ("settings.gradle.kts", "java"),
+             ("AndroidManifest.xml", "kotlin"))
 DOCKER_BASES = (("golang", "go"), ("node", "javascript"), ("python", "python"), ("openjdk", "java"),
                 ("eclipse-temurin", "java"), ("gradle", "java"), ("maven", "java"), ("rust", "rust"),
                 ("ruby", "ruby"), ("php", "php"), ("dotnet", "csharp"), ("elixir", "elixir"), ("gcc", "cpp"))
@@ -108,6 +112,12 @@ def _interpolate(text: str, env: dict[str, str]) -> str:
 
 def _has(path: Path, marker: str) -> bool:
     return bool(next(path.glob(marker), None)) if "*" in marker else (path / marker).exists()
+
+
+def _has_files(repo: Path) -> bool:
+    """Is there anything in the folder besides hidden files and `.git`?"""
+    return any(p.is_file() and not p.name.startswith(".") and ".git" not in p.relative_to(repo).parts[:1]
+               for p in repo.rglob("*"))
 
 
 def _language(path: Path, dockerfile: Path | None = None, deep: bool = True) -> str:
@@ -460,7 +470,8 @@ def _expand_monolith(repo: Path, services: dict[str, dict], databases: dict[str,
         if target == mono["name"]:
             new_aliases.update({f"{address}/api/{m.split('.', 1)[1]}": m for m in new_services if m.startswith("api.")})
     changes = _git_module_changes(repo, since, found["module_of"], set(new_services))
-    return {"services": new_services, "databases": new_dbs, "deps": new_deps, "aliases": new_aliases, "changes": changes}
+    return {"services": new_services, "databases": new_dbs, "deps": new_deps, "aliases": new_aliases, "changes": changes,
+            "prefix": found["prefix"]}
 
 
 def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
@@ -539,10 +550,12 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
                                         "revenue_per_min": 0, "team": _owner(rules, rel), "published": False,
                                         "layer": None}
 
-    if compose is None and k8s is None and not services and _language(repo):
-        # No compose file and no services folders: the repository is one application.
+    if compose is None and k8s is None and not services and _has_files(repo):
+        # No compose file and no services folders: the repository is one application, whatever it is written in. (A mobile app, a
+        # library, a CLI, a monorepo with its own layout.) Never refuse: its modules are mapped below from the code.
         name = re.sub(r"[^a-z0-9-]+", "-", repo.name.lower()).strip("-") or "app"
-        services[name] = {"name": name, "path": "", "language": _language(repo), "tier": "medium", "revenue_per_min": 0,
+        services[name] = {"name": name, "path": "", "language": _language(repo) or dominant_language(repo), "tier": "medium",
+                          "revenue_per_min": 0,
                           "team": _owner(rules, ""), "published": False, "layer": None}
     expanded = _expand_monolith(repo, services, databases, deps, aliases, rules, since)
     if expanded:
@@ -564,6 +577,7 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
         "ignored": sorted(ignored),
         "changes": (expanded["changes"] if expanded else
                     _git_changes(repo, {s["name"]: s["path"] for s in services.values()}, since)),
+        "module_prefix": expanded["prefix"] if expanded else "",
         "source": ("docker-compose" if compose is not None else "kubernetes" if k8s is not None else "directories")
                   + (" + code imports" if expanded else ""),
     }

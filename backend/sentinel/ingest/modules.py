@@ -18,9 +18,21 @@ from typing import Any
 
 JS_EXT = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 PY_EXT = (".py",)
+# Every other language: modules are still folders, but a file's dependencies cannot be read from its import lines (Swift and C# import
+# whole modules, Java and Kotlin share a namespace), so they are read from the types it uses: see `_type_dependencies`.
+OTHER_LANGUAGES = {".swift": "swift", ".kt": "kotlin", ".kts": "kotlin", ".java": "java", ".scala": "scala", ".go": "go",
+                   ".rs": "rust", ".rb": "ruby", ".php": "php", ".cs": "csharp", ".fs": "fsharp", ".c": "c", ".h": "c",
+                   ".cc": "cpp", ".cpp": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".m": "objective-c", ".mm": "objective-c",
+                   ".dart": "dart", ".ex": "elixir", ".exs": "elixir", ".lua": "lua", ".zig": "zig", ".hs": "haskell",
+                   ".clj": "clojure", ".erl": "erlang", ".vue": "vue", ".svelte": "svelte"}
+OTHER_EXT = tuple(OTHER_LANGUAGES)
+TYPE_DECL = re.compile(r"\b(?:class|struct|enum|protocol|actor|interface|trait|object|record|type|typealias)\s+([A-Z][A-Za-z0-9_]{3,})")
+CAPITALISED = re.compile(r"\b[A-Z][A-Za-z0-9_]{3,}\b")
 SKIP_DIRS = {"node_modules", ".git", ".next", "dist", "build", "out", "coverage", "__pycache__", ".venv", "venv", "env",
              "tests", "test", "__tests__", "e2e", "scratch", "docs", "doc", "diagram", "migrations", "prisma", "public",
-             "static", ".storage", "vendor", ".turbo", ".cache", "scripts", "storybook", ".github"}
+             "static", ".storage", "vendor", ".turbo", ".cache", "scripts", "storybook", ".github", "pods", "carthage", "deriveddata",
+             ".build", "target", "obj", "bin", ".gradle", "xcuserdata", "uitests", "androidtest", "third_party", "thirdparty",
+             "generated", "__generated__"}
 MAX_FILES = 4000
 MAX_BYTES = 1_000_000
 
@@ -63,18 +75,21 @@ JS_IMPORT = re.compile(r"""(?:\bimport\s+(?:[^'"()]*?\s+from\s+)?|\bexport\s+[^'
 PY_IMPORT = re.compile(r"^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w., ]+))", re.M)
 ENV_USE = re.compile(r"""(?:process\.env\.|process\.env\[\s*['"]|os\.environ(?:\.get)?\s*[\[(]\s*['"]|os\.getenv\s*\(\s*['"]|env\(\s*['"])([A-Z][A-Z0-9_]+)""")
 URL_HOST = re.compile(r"https?://([a-z0-9.-]+)", re.I)
-TEST_FILE = re.compile(r"(\.(test|spec|stories)\.[jt]sx?$|(^|/)test_.*\.py$|_test\.py$|(^|/)conftest\.py$)")
+TEST_FILE = re.compile(r"(\.(test|spec|stories)\.[jt]sx?$|(^|/)test_.*\.py$|_test\.py$|(^|/)conftest\.py$|"
+                       r"(Tests?|Spec|IT)\.(swift|kt|java|cs|scala|m)$|_test\.(go|rs|c|cc|cpp)$|(^|/)src/test/)")
 
 
 def _is_test(rel: str) -> bool:
     return bool(TEST_FILE.search(rel))
 
 
-def module_of(rel: str) -> str:
+def module_of(rel: str, prefix: str = "") -> str:
     """A file's module, by its folder: `app/api/documents/[id]/route.ts` -> `api.documents`, `lib/ai/agent.ts` ->
     `lib.ai`, `components/Navbar.tsx` -> `components`, `src/billing/models.py` -> `billing`."""
+    if prefix and rel.startswith(prefix + "/"):
+        rel = rel[len(prefix) + 1:]
     parts = rel.split("/")
-    if parts[0] == "src" and len(parts) > 1:
+    if parts[0] in ("src", "Sources", "Source") and len(parts) > 1:
         parts = parts[1:]
     if len(parts) == 1:
         return "root"
@@ -93,10 +108,12 @@ def _source_files(root: Path) -> list[str]:
     for p in sorted(root.rglob("*")):
         if len(out) >= MAX_FILES:
             break
-        if not p.is_file() or p.suffix not in JS_EXT + PY_EXT:
+        if not p.is_file() or p.suffix not in JS_EXT + PY_EXT + OTHER_EXT:
             continue
         rel = p.relative_to(root).as_posix()
-        if SKIP_DIRS & set(rel.split("/")[:-1]) or _is_test(rel) or p.name.endswith(".d.ts"):
+        folders = [d.lower() for d in rel.split("/")[:-1]]
+        if SKIP_DIRS & set(folders) or any(d.endswith(("tests", "test", "specs")) for d in folders) or _is_test(rel) \
+                or p.name.endswith(".d.ts"):
             continue
         try:
             if p.stat().st_size > MAX_BYTES:
@@ -162,6 +179,51 @@ def _package_root(spec: str) -> str:
     return "/".join(spec.split("/")[:2]) if spec.startswith("@") else spec.split("/")[0]
 
 
+def dominant_language(root: Path) -> str:
+    """The language most of the source here is written in, from file extensions ('' when there is no source)."""
+    counts: dict[str, int] = {}
+    for rel in _source_files(root):
+        ext = "." + rel.rsplit(".", 1)[-1]
+        lang = ("typescript" if ext in (".ts", ".tsx") else "javascript" if ext in JS_EXT else "python" if ext in PY_EXT
+                else OTHER_LANGUAGES.get(ext, ""))
+        if lang:
+            counts[lang] = counts.get(lang, 0) + 1
+    return max(counts, key=counts.get) if counts else ""
+
+
+def _wrapper(rels: list[str]) -> str:
+    """The folder that holds everything (`bitchat/` in `bitchat/bitchat/Services/...`), so modules are what is inside it."""
+    prefix = ""
+    while True:
+        inside = [r[len(prefix) + 1:] if prefix else r for r in rels]
+        tops = {r.split("/")[0] for r in inside if "/" in r}
+        loose = [r for r in inside if "/" not in r]
+        if len(tops) != 1 or len(loose) > 1 or tops & {"src", "Sources", "Source", "app", "lib"}:
+            return prefix
+        prefix = f"{prefix}/{tops.pop()}" if prefix else tops.pop()
+
+
+def _type_dependencies(root: Path, rels: list[str], mod_of: Any) -> set[tuple[str, str]]:
+    """module -> module, for languages whose imports do not name files: module A depends on B when A's code uses a type that only B
+    declares. Names declared in several modules are ambiguous and ignored."""
+    declared: dict[str, set[str]] = {}
+    texts: dict[str, str] = {}
+    for rel in rels:
+        if not rel.endswith(OTHER_EXT):
+            continue
+        texts[rel] = (root / rel).read_text(errors="ignore")
+        for name in TYPE_DECL.findall(texts[rel]):
+            declared.setdefault(name, set()).add(mod_of(rel))
+    owner = {n: next(iter(m)) for n, m in declared.items() if len(m) == 1}
+    deps: set[tuple[str, str]] = set()
+    for rel, text in texts.items():
+        mine = mod_of(rel)
+        for name in set(CAPITALISED.findall(text)):
+            if (other := owner.get(name)) and other != mine:
+                deps.add((mine, other))
+    return deps
+
+
 def scan_modules(root: Path, min_modules: int = 2) -> dict[str, Any] | None:
     """Modules of the code under `root` and their dependencies, or None when there is no structure to show."""
     root = root.resolve()
@@ -170,6 +232,8 @@ def scan_modules(root: Path, min_modules: int = 2) -> dict[str, Any] | None:
     if not rels:
         return None
     aliases = _aliases(root)
+    prefix = _wrapper(rels)
+    mod_of = lambda r: module_of(r, prefix)  # noqa: E731
     py_tops = {r.split("/")[0] for r in rels if r.endswith(".py") and "/" in r}
     prisma_engine = _prisma_engine(root)
 
@@ -177,10 +241,12 @@ def scan_modules(root: Path, min_modules: int = 2) -> dict[str, Any] | None:
     deps: set[tuple[str, str]] = set()
     outside: dict[str, set[tuple[str, str, str]]] = {}
     for rel in rels:
-        mod = module_of(rel)
+        mod = mod_of(rel)
         m = modules.setdefault(mod, {"name": mod, "files": 0, "path": "", "py": 0, "js": 0})
         m["files"] += 1
         m["py" if rel.endswith(".py") else "js"] += 1
+        if rel.endswith(OTHER_EXT):
+            continue  # dependencies of these come from the types they use, below
         text = (root / rel).read_text(errors="ignore")
         ext = outside.setdefault(mod, set())
         if rel.endswith(PY_EXT):
@@ -191,14 +257,14 @@ def scan_modules(root: Path, min_modules: int = 2) -> dict[str, Any] | None:
                         target = next((r for r in (f"{name.replace('.', '/')}.py", f"{name.replace('.', '/')}/__init__.py")
                                        if r in files), None)
                         if target:
-                            deps.add((mod, module_of(target)))
+                            deps.add((mod, mod_of(target)))
                     elif name in PACKAGES or top in PACKAGES:
                         ext.add(PACKAGES.get(name) or PACKAGES[top])
         else:
             for spec in JS_IMPORT.findall(text):
                 target = _resolve_js(root, files, rel, spec, aliases)
                 if target:
-                    deps.add((mod, module_of(target)))
+                    deps.add((mod, mod_of(target)))
                     continue
                 pkg = _package_root(spec)
                 if pkg == "@prisma/client":
@@ -215,13 +281,14 @@ def scan_modules(root: Path, min_modules: int = 2) -> dict[str, Any] | None:
             if host.lower() in HOSTS:
                 ext.add(HOSTS[host.lower()])
     for name, m in modules.items():
-        dirs = [Path(r).parent.as_posix() for r in rels if module_of(r) == name]
+        dirs = [Path(r).parent.as_posix() for r in rels if mod_of(r) == name]
         m["path"] = Path(os.path.commonpath(dirs)).as_posix() if dirs else ""
         m["path"] = "" if m["path"] == "." else m["path"]
+    deps |= _type_dependencies(root, rels, mod_of)
     deps = {(a, b) for a, b in deps if a != b and a in modules and b in modules}
     modules = {n: m for n, m in modules.items() if n != "root" or m["files"] > 1}
     if len(modules) < min_modules:
         return None
     return {"modules": modules, "dependencies": deps,
             "outside": {m: sorted(v) for m, v in outside.items() if v and m in modules},
-            "module_of": module_of}
+            "module_of": mod_of, "prefix": prefix}

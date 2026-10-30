@@ -47,6 +47,12 @@ def scale(history: list[float]) -> tuple[float, float]:
     return med, max(mad, 0.1 * abs(med), 1e-6)
 
 
+def z(value: float, history: list[float]) -> float:
+    """How many normal wobbles `value` is above what is typical (0 when it is not above)."""
+    med, spread = scale(history)
+    return max(0.0, (value - med) / spread)
+
+
 def is_slow(value: float, history: list[float], z: float, ratio: float) -> bool:
     if len(history) < MIN_BATCHES:
         return False

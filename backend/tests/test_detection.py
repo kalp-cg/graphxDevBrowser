@@ -88,3 +88,37 @@ def test_metrics_flag_the_service_whose_series_left_its_own_normal(graph):
 def test_metrics_with_too_little_history_say_nothing():
     assert metrics.score_series([[t, 1.0] for t in range(5)], 2) is None
     assert metrics.score_series([], 60) is None
+
+
+# --- big systems: loops between services, and many services flagging at once -----------------------------------------------
+
+def build(graph, edges, unhealthy):
+    """services and calls from edges; `unhealthy` = {name: alert strength as value/threshold}."""
+    from sentinel.db import Batch, link, upsert
+    from sentinel.schema import ensure_schema
+    from sentinel.seed.generator import wipe
+
+    wipe(graph)
+    ensure_schema(graph)
+    names = sorted({n for e in edges for n in e} | set(unhealthy))
+    b = Batch()
+    upsert(b, "Service", [{"uid": f"svc:{n}", "name": n, "kind": "service", "tier": "medium",
+                           "status": "degraded" if n in unhealthy else "healthy", "root_fault": False} for n in names])
+    link(b, "Service", "DEPENDS_ON", "Service", [(f"svc:{a}", f"svc:{c}", {"uid": f"e:{a}->{c}", "protocol": "http", "weight": 1})
+                                                 for a, c in edges])
+    upsert(b, "Alert", [{"uid": f"alert:t-{n}", "id": f"t-{n}", "metric": "m", "value": v * 10, "threshold": 10, "at": 1,
+                         "status": "firing", "scenario": "t"} for n, v in unhealthy.items()])
+    link(b, "Alert", "FIRED_ON", "Service", [(f"alert:t-{n}", f"svc:{n}") for n in unhealthy])
+    b.send(graph)
+
+
+def roots(graph, names):
+    return [r["name"] for r in rootcause.find_root_causes(names, graph)["result"]["roots"]]
+
+
+def test_services_that_call_each_other_still_have_a_root(graph):
+    # web -> a <-> b -> db: a and b call each other. Every service in the loop is "beneath" another, so none used to be a root.
+    build(graph, [("web", "a"), ("a", "b"), ("b", "a"), ("b", "db")], {"web": 3, "a": 8, "b": 9, "db": 2})
+    assert roots(graph, ["web", "a", "b", "db"])      # something is named
+    build(graph, [("web", "a"), ("a", "b"), ("b", "a")], {"web": 3, "a": 8, "b": 9})
+    assert roots(graph, ["web", "a", "b"])[0] in ("a", "b")

@@ -23,33 +23,52 @@ MIN_BASELINE = 10      # points of history needed before a series is judged
 SCENARIO = "metrics"
 
 
+ONSET_Z = Z_ALERT / 2   # a series has "started deviating" when it is this far from normal
+
+
 def score_series(points: list[list[float]], recent_seconds: int) -> float | None:
     """How far the recent window's mean sits from the older history, in units of its normal wobble. None: too little history."""
+    scored = score_with_onset(points, recent_seconds)
+    return None if scored is None else scored[0]
+
+
+def score_with_onset(points: list[list[float]], recent_seconds: int) -> tuple[float, float | None] | None:
+    """(deviation, when it started): the first moment in the recent window the series was already far from normal, or None if never."""
     pts = sorted((float(t), float(v)) for t, v in points if v is not None)
     if not pts:
         return None
     cut = pts[-1][0] - recent_seconds
     old = [v for t, v in pts if t <= cut]
-    new = [v for t, v in pts if t > cut]
+    new = [(t, v) for t, v in pts if t > cut]
     if len(old) < MIN_BASELINE or not new:
         return None
     med, spread = baselines.scale(old)
-    return abs(sum(new) / len(new) - med) / spread
+    z = abs(sum(v for _, v in new) / len(new) - med) / spread
+    onset = next((t for t, v in new if abs(v - med) / spread >= ONSET_Z), None)
+    return z, onset
 
 
 def analyze(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """service -> {"z": strongest deviation, "metric": the series that showed it}."""
+    """service -> {"z": how far it left normal, "metric": the series that showed it most, "onset": when it started (epoch seconds)}.
+
+    A service exposes dozens of series, so the strongest of them alone is often just the noisiest one. A real fault moves several related
+    series (CPU and latency and request rate), so a service's score is the mean of its two strongest; a service with a single series
+    is judged on that one."""
     recent = int(payload.get("recent_seconds") or 300)
-    found: dict[str, dict[str, Any]] = {}
+    per: dict[str, list[tuple[float, str, float | None]]] = {}
     for s in payload.get("series", []):
         service, metric = s.get("service"), s.get("metric")
         if not service or not metric:
             continue
-        z = score_series(s.get("points", []), recent)
-        if z is not None and z > found.get(service, {"z": 0.0})["z"]:
-            found[service] = {"z": z, "metric": metric}
-        else:
-            found.setdefault(service, {"z": 0.0, "metric": metric})
+        scored = score_with_onset(s.get("points", []), recent)
+        per.setdefault(service, []).append((scored[0], metric, scored[1]) if scored else (0.0, metric, None))
+    found: dict[str, dict[str, Any]] = {}
+    for service, zs in per.items():
+        zs.sort(key=lambda r: -r[0])
+        top = zs[:2]
+        onsets = [o for _, _, o in top if o is not None]
+        found[service] = {"z": sum(z for z, _, _ in top) / len(top), "metric": zs[0][1], "strongest": zs[0][0],
+                          "onset": min(onsets) if onsets else None}
     return found
 
 
@@ -70,7 +89,8 @@ def ingest_metrics(graph: Graph, payload: dict[str, Any], at: int | None = None)
     alerts = {f"alert:{SCENARIO}-{s}": (s, v) for s, v in bad.items()}
     upsert(batch, "Alert", [
         {"uid": uid, "id": uid.removeprefix("alert:"), "metric": v["metric"], "value": round(v["z"], 1), "threshold": Z_ALERT,
-         "at": at, "status": "firing", "scenario": SCENARIO} for uid, (s, v) in alerts.items()])
+         "at": int(v["onset"] * 1000) if v.get("onset") else at, "status": "firing", "scenario": SCENARIO}
+        for uid, (s, v) in alerts.items()])
     link(batch, "Alert", "FIRED_ON", "Service", [(uid, f"svc:{s}") for uid, (s, _v) in alerts.items()])
     cleared = sorted(firing_before - set(alerts))
     upsert(batch, "Alert", [{"uid": uid, "status": "resolved"} for uid in cleared])

@@ -4,6 +4,14 @@ All notable changes. Versions follow [semantic versioning](https://semver.org/).
 
 ## Unreleased
 
+### Scans any codebase (found by opening BitChat, a Swift app)
+- Opening a repository with no compose file and no JavaScript or Python manifests (BitChat, a Swift app) failed with "no services found".
+  The scanner now recognises Swift, Kotlin, Java, Go, Rust, C#, C/C++, Dart, Ruby, PHP, Scala, Elixir and more, and a repository with no
+  services layout is mapped as one application broken into its modules (folders).
+- Dependencies between modules in these languages are found from the types each module uses that only another module declares.
+- Folders that only wrap the code, build output, vendored code and test folders are not modules. Pre-merge impact works for them too.
+- The only refusal left is a folder with no files in it.
+
 ### Finds faults that raise no errors (found by testing on real data)
 - Tested on RCAEval, a public benchmark of real injected faults (Online Boutique, 90 cases): the product named the right root cause in
   **0 of 90** cases. It only treated a service as unhealthy when its spans carried errors, and CPU, memory, disk and network faults

@@ -455,3 +455,68 @@ def test_investigate_this_failure(api, graph):
     assert cur["run_id"] == run_id and not cur["running"]
     assert cur["events"][-1]["type"] == "final" and all(e["run_id"] == run_id for e in cur["events"])
     assert cur["events"][-1]["root_cause"] == "gateway"  # the deepest failure the evidence shows
+
+
+# --- any codebase: the scanner never refuses --------------------------------------------------------------------------------------
+
+def _write(root: Path, files: dict[str, str]) -> None:
+    for rel, text in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
+
+
+def test_a_swift_app_is_mapped_by_its_folders_and_the_types_they_share(tmp_path):
+    # No compose file, no package.json: a mobile/desktop app (BitChat was the first to be refused).
+    _write(tmp_path / "MyApp", {
+        "App/MyApp.swift": "import SwiftUI\nstruct MyApp { let model = ChatViewModel(); let net = MeshService() }",
+        "ViewModels/ChatViewModel.swift": "final class ChatViewModel { let transport = MeshService(); let keys = NoiseSession() }",
+        "Services/MeshService.swift": "class MeshService { let crypto = NoiseSession() }",
+        "Noise/NoiseSession.swift": "struct NoiseSession {}",
+        "Views/ChatView.swift": "struct ChatView { let vm = ChatViewModel() }",
+        "Info.plist": "<plist/>",
+    })
+    m = codebase.scan(tmp_path / "MyApp")
+    assert {s["name"] for s in m["services"]} == {"App", "ViewModels", "Services", "Noise", "Views"}
+    assert {s["language"] for s in m["services"]} == {"swift"}
+    deps = {tuple(d) for d in m["dependencies"]}
+    assert {("App", "ViewModels"), ("App", "Services"), ("ViewModels", "Services"), ("ViewModels", "Noise"),
+            ("Services", "Noise"), ("Views", "ViewModels")} <= deps
+    assert ("Noise", "Services") not in deps
+
+
+def test_a_folder_that_only_wraps_the_code_is_not_a_module(tmp_path):
+    _write(tmp_path / "repo", {f"repo/{d}/{d}Thing.kt": f"class {d}Thing" for d in ("Auth", "Billing", "Search")}
+           | {"repo/Billing/Pay.kt": "class Pay { val a = AuthThing() }"})
+    m = codebase.scan(tmp_path / "repo")
+    assert {s["name"] for s in m["services"]} == {"Auth", "Billing", "Search"}
+    assert ("Billing", "Auth") in {tuple(d) for d in m["dependencies"]}
+
+
+@pytest.mark.parametrize("files, language", [
+    ({"main.go": "package main\nfunc main() {}", "go.mod": "module x"}, "go"),
+    ({"src/lib.rs": "pub struct Engine {}", "Cargo.toml": "[package]"}, "rust"),
+    ({"README.md": "# just docs"}, ""),
+    ({"a.c": "int main(){}"}, "c"),
+])
+def test_any_repository_scans_to_something_and_never_raises(tmp_path, files, language):
+    _write(tmp_path / "proj", files)
+    m = codebase.scan(tmp_path / "proj")
+    assert m["services"], "a repository is at least one application"
+    assert m["services"][0]["language"] == language
+
+
+def test_test_folders_are_not_modules(tmp_path):
+    _write(tmp_path / "app", {"Core/Engine.swift": "class Engine {}", "Net/Client.swift": "class Client { let e = Engine() }",
+                              "appTests/EngineTests.swift": "class EngineTests { let e = Engine() }",
+                              "UITests/Flow.swift": "class Flow {}"})
+    assert {s["name"] for s in codebase.scan(tmp_path / "app")["services"]} == {"Core", "Net"}
+
+
+def test_impact_works_for_modules_of_a_non_javascript_app(tmp_path):
+    from sentinel.impact import impact_from_manifest
+
+    _write(tmp_path / "MyApp", {"Services/Mesh.swift": "class Mesh {}", "Views/Chat.swift": "class Chat { let m = Mesh() }",
+                                "Noise/N.swift": "class Noise {}"})
+    manifest = codebase.scan(tmp_path / "MyApp")
+    out = impact_from_manifest(manifest, ["Services/Mesh.swift"])
+    assert [c["name"] for c in out["changed"]] == ["Services"] and [a["name"] for a in out["affected"]] == ["Views"]

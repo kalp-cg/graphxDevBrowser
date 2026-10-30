@@ -302,8 +302,7 @@ async def scan_workspace(body: dict[str, Any]) -> dict:
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     if not manifest["services"] and not manifest["databases"]:
-        raise HTTPException(422, f"no services found in {path} (looked for a docker-compose file or "
-                                 "directories with a package manifest under ., services/, apps/, packages/)")
+        raise HTTPException(422, f"{path} has no files to map (it is empty, or only hidden files). Pick the folder that holds the project.")
     # A different codebase is a different system: its map replaces the previous one (seeded demo company included),
     # so the graph shows what was connected and nothing else. A re-scan of the same repo only updates it.
     replaced = bool(body.get("replace", True)) and workspace.load().get("repo") != manifest["repo"]

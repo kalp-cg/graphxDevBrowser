@@ -40,8 +40,15 @@ def service_for_file(manifest: dict[str, Any], rel: str) -> str | None:
     services = manifest["services"]
     names = {s["name"] for s in services}
     if any(s.get("kind") == "module" for s in services):
-        m = module_of(rel)
-        return m if m in names else None
+        m = module_of(rel, manifest.get("module_prefix", ""))
+        if m in names:
+            return m
+        best, best_len = None, -1   # a module's folder, when its name does not follow the usual rule
+        for sv in services:
+            p = (sv.get("path") or "").strip("/")
+            if sv.get("kind") == "module" and p and (rel == p or rel.startswith(p + "/")) and len(p) > best_len:
+                best, best_len = sv["name"], len(p)
+        return best
     best, best_len = None, -1
     for s in services:
         p = (s.get("path") or "").strip("/")
