@@ -34,6 +34,8 @@ export const IPC_CHANNELS = {
   BROWSER_COMMAND: 'devbrowser:browser:command',
   BROWSER_EMULATE: 'devbrowser:browser:emulate',
   BROWSER_THROTTLE: 'devbrowser:browser:throttle',
+  BROWSER_PROBE: 'devbrowser:browser:probe',
+  SENTINEL_REPORT_DEV_SERVER: 'devbrowser:sentinel:report-dev-server',
   SENTINEL_RESOLVE: 'devbrowser:sentinel:resolve',
   SENTINEL_CURRENT_RUN: 'devbrowser:sentinel:currentRun',
   SENTINEL_APPROVE_ACTION: 'devbrowser:sentinel:approveAction',

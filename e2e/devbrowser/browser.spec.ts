@@ -1,5 +1,6 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from "@playwright/test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -501,6 +502,76 @@ test("relaunching restores the tabs and the SentinelGraph connection", async () 
   await expect(tabs()).toHaveCount(titles.length);
   await expect(page.getByRole("tab", { name: /Sandbox Shop/ }).first()).toBeVisible();
   await expect(page.getByRole("contentinfo").getByText("SentinelGraph connected")).toBeVisible();
+});
+
+test("tabs behave like a browser: switch, pin, reorder, right-click menu, and each tab keeps its own address", async () => {
+  const strip = page.getByRole("tablist", { name: "Tabs" });
+  const labels = () => strip.getByRole("tab").evaluateAll(els => els.map(e => e.getAttribute("aria-label") ?? ""));
+  const before = (await labels()).length;
+  await page.getByRole("button", { name: "New tab", exact: true }).click();
+  await go("localhost:7400/?page=3");
+  await page.getByRole("button", { name: "New tab", exact: true }).click();
+  await go("localhost:7400/?page=4");
+  await expect(strip.getByRole("tab")).toHaveCount(before + 2);
+  await expect(address()).toHaveValue(shownAs("localhost:7400/?page=4"));
+  // Switching shows that tab's page and address at once.
+  await strip.getByRole("tab").nth(before).click();
+  await expect(address()).toHaveValue(shownAs("localhost:7400/?page=3"));
+  await strip.getByRole("tab").nth(before + 1).click();
+  await expect(address()).toHaveValue(shownAs("localhost:7400/?page=4"));
+  // Right-click menu: pin moves the tab to the front and takes away its close button.
+  await strip.getByRole("tab").nth(before + 1).click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Tab menu" });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("menuitem", { name: "Pin tab" }).click();
+  await expect(menu).toBeHidden();
+  await expect(strip.getByRole("tab").first()).toHaveAttribute("aria-label", /\(pinned\)/);
+  // Duplicate puts a copy next to the original; closing the others leaves the pinned tab and the chosen one.
+  await strip.getByRole("tab").nth(before + 1).click({ button: "right" });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("menuitem", { name: "Duplicate" }).click();
+  await expect(menu).toBeHidden();
+  await expect(strip.getByRole("tab")).toHaveCount(before + 3);
+  await strip.getByRole("tab").last().click({ button: "right" });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("menuitem", { name: "Close other tabs" }).click();
+  await expect(menu).toBeHidden();
+  await expect(strip.getByRole("tab")).toHaveCount(2);                    // the pinned one and this one
+  await strip.getByRole("tab").first().click({ button: "right" });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("menuitem", { name: "Unpin tab" }).click();
+  await shot("17-tabs");
+});
+
+test("a dev server that dies under a tab is noticed at once, shown on the tab, and the tab recovers by itself", async () => {
+  test.setTimeout(90_000);
+  const html = "<title>Dev App</title><h1>my app</h1>";
+  const start = () => new Promise<import("node:http").Server>(resolve => {
+    const srv = createServer((_req, res) => { res.setHeader("content-type", "text/html"); res.end(html); });
+    srv.listen(7788, "127.0.0.1", () => resolve(srv));
+  });
+  let server = await start();
+  await page.getByRole("button", { name: "New tab", exact: true }).click();
+  await go("localhost:7788");
+  await expect(page.getByRole("tab", { name: /Dev App/ })).toBeVisible();
+  await expect(page.getByRole("alert", { name: "Dev server stopped" })).toHaveCount(0);
+  await expect.poll(() => page.getByRole("tab", { name: /Dev App/ }).getAttribute("aria-label")).not.toContain("server stopped");
+
+  server.closeAllConnections();
+  await new Promise<void>(r => server.close(() => r()));                // the crash
+  const banner = page.getByRole("alert", { name: "Dev server stopped" });
+  await expect(banner).toBeVisible({ timeout: 20_000 });
+  await expect(banner).toContainText("localhost:7788 stopped responding");
+  await expect(page.getByRole("tab", { name: /Dev App.*server stopped/ })).toBeVisible();
+  await expect(page.getByText("localhost:7788 stopped responding").first()).toBeVisible();   // and a notification
+  await shot("18-dev-server-down");
+
+  server = await start();                                                // the developer restarts it
+  await expect(banner).toBeHidden({ timeout: 20_000 });
+  await expect(page.getByText("localhost:7788 is back").first()).toBeVisible();
+  await expect(page.getByRole("tab", { name: /Dev App/ })).not.toHaveAttribute("aria-label", /server stopped/);
+  await page.getByRole("button", { name: /^Close Dev App/ }).click();
+  await new Promise<void>(r => server.close(() => r()));
 });
 
 test("sandbox test: load the 38-service company and see the agent scored on what was broken", async () => {

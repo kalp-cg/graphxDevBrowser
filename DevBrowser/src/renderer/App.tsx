@@ -11,6 +11,7 @@ import { ToastContainer } from './components/common/ToastContainer';
 import { useAppStore } from './store/useAppStore';
 import { useBrowserStore } from './store/useBrowserStore';
 import { FULL_PAGE_VIEWS, useNarrow } from './useNarrow';
+import { startDevServerWatch } from './browser/devServerWatch';
 import { emulate, goBack, goForward, reload, toggleDevTools, zoom } from './browser/pages';
 import { DEVICES, SEARCH_URL } from '../shared/domain/browser';
 import type { BrowserCommand } from '../shared/ipc-channels';
@@ -79,6 +80,7 @@ export const App: React.FC = () => {
     let unsubscribeNetwork: (() => void) | undefined;
     let unsubscribeCommands: (() => void) | undefined;
     let metricsInterval: ReturnType<typeof setInterval> | undefined;
+    let stopWatch: (() => void) | undefined;
 
     if (window.devBrowserAPI) {
       window.devBrowserAPI.system.getHardwareMetrics().then(app.setHardwareMetrics).catch(console.error);
@@ -96,6 +98,7 @@ export const App: React.FC = () => {
         }).catch(console.error);
       });
       unsubscribeCommands = window.devBrowserAPI.browser.onCommand(runCommand);
+      stopWatch = startDevServerWatch();
     }
 
     // Shortcuts that are not in the app menu (the menu handles the rest, even while a page has focus).
@@ -118,6 +121,7 @@ export const App: React.FC = () => {
       if (metricsInterval) clearInterval(metricsInterval);
       unsubscribeNetwork?.();
       unsubscribeCommands?.();
+      stopWatch?.();
       window.removeEventListener('keydown', onKeyDown);
     };
   }, []);

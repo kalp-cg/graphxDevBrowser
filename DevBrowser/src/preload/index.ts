@@ -57,6 +57,8 @@ const devBrowserAPI: DevBrowserAPI = {
     breakService: (service: string, kind: string, additive?: boolean) =>
       ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_BREAK_SERVICE, { service, kind, additive }),
     aliases: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_ALIASES),
+    reportDevServer: (service: string, firing: boolean, address: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_REPORT_DEV_SERVER, { service, firing, address }),
     sandbox: (args: unknown) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_SANDBOX, args),
     impact: (base?: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_IMPACT, { base }),
     restoreHealthy: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_RESTORE_HEALTHY)
@@ -74,6 +76,7 @@ const devBrowserAPI: DevBrowserAPI = {
     },
     emulate: (webContentsId: number, device: EmulatedDevice | null) =>
       ipcRenderer.invoke(IPC_CHANNELS.BROWSER_EMULATE, { webContentsId, device }),
+    probe: (origin: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PROBE, { origin }),
     throttle: (webContentsId: number, preset: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.BROWSER_THROTTLE, { webContentsId, preset })
   }

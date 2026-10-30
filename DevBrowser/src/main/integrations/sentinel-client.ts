@@ -144,6 +144,17 @@ export class SentinelGraphClient {
     return this.request('POST', '/api/impact', base ? { base } : {});
   }
 
+  /** A dev server stopped (or started answering again): an alert on the service that owns that address, as Alertmanager would send it. */
+  public reportDevServer(service: string, firing: boolean, address: string): Promise<unknown> {
+    return this.request('POST', '/api/alerts/alertmanager', {
+      alerts: [{
+        status: firing ? 'firing' : 'resolved',
+        labels: { alertname: 'DevServerDown', service, severity: 'critical' },
+        annotations: { summary: `${address} stopped answering (seen by DevBrowser)` }
+      }]
+    });
+  }
+
   /** The sandbox company and its exam: read the state, load the company, start or cancel a test. */
   public sandbox(a: SandboxAction): Promise<SandboxState | unknown> {
     switch (a.action) {

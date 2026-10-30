@@ -135,6 +135,8 @@ export const PageView: React.FC<Props> = ({ tab, visible, paneOrder, showPaneHea
         </div>
       )}
 
+      {tab.devServer === 'down' && !tab.error && !isStart && <DownBanner tab={tab} />}
+
       {preset && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, height: 34, flexShrink: 0,
           fontSize: 12, color: 'var(--text-secondary)', background: 'var(--bg-secondary)',
@@ -221,3 +223,21 @@ function explain(code: string, local: boolean): string {
   if (code.includes('INTERNET_DISCONNECTED')) return 'This computer is offline.';
   return 'The page could not be loaded.';
 }
+
+/** The page on screen is the last one the server sent; the server itself is gone. Said at the top, without hiding what was loaded. */
+const DownBanner: React.FC<{ tab: Tab }> = ({ tab }) => {
+  let host = tab.url;
+  try {
+    host = new URL(tab.url).host;
+  } catch {
+    // keep the raw URL
+  }
+  return (
+    <div role="alert" aria-label="Dev server stopped" style={{ flexShrink: 0, display: 'flex',
+      alignItems: 'center', gap: 10, padding: '8px 14px', fontSize: 13, background: 'var(--danger)', color: '#fff' }}>
+      <span style={{ fontWeight: 700 }}>{host} stopped responding.</span>
+      <span style={{ opacity: 0.9 }}>What you see is the last page it sent. This tab reloads itself when the server is back.</span>
+      <button className="btn" style={{ marginLeft: 'auto', height: 24 }} onClick={() => reload(tab.id)}>Try now</button>
+    </div>
+  );
+};

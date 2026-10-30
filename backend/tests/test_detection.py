@@ -122,3 +122,14 @@ def test_services_that_call_each_other_still_have_a_root(graph):
     assert roots(graph, ["web", "a", "b", "db"])      # something is named
     build(graph, [("web", "a"), ("a", "b"), ("b", "a")], {"web": 3, "a": 8, "b": 9})
     assert roots(graph, ["web", "a", "b"])[0] in ("a", "b")
+
+
+def test_an_alert_that_resolves_makes_its_service_healthy_again(graph):
+    from sentinel.ingest.alerts import ingest_alertmanager
+
+    build(graph, [("web", "api")], {})
+    alert = lambda status: {"alerts": [{"status": status, "labels": {"alertname": "DevServerDown", "service": "api"}}]}  # noqa: E731
+    ingest_alertmanager(graph, alert("firing"))
+    assert status(graph)["api"] == "degraded"
+    ingest_alertmanager(graph, alert("resolved"))
+    assert status(graph) == {"api": "healthy", "web": "healthy"}

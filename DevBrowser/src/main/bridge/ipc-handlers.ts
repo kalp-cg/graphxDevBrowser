@@ -107,6 +107,19 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.SENTINEL_ALIASES, async () => sentinelClient.aliases());
 
+  // Is anything answering at this origin? Any HTTP response counts (a 500 is a server with a bug, not one that is gone).
+  ipcMain.handle(IPC_CHANNELS.BROWSER_PROBE, async (_event, args: { origin: string }): Promise<{ up: boolean }> => {
+    try {
+      const res = await fetch(args.origin, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(2000) });
+      void res.body?.cancel();
+      return { up: true };
+    } catch {
+      return { up: false };
+    }
+  });
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_REPORT_DEV_SERVER,
+    async (_event, args: { service: string; firing: boolean; address: string }) =>
+      sentinelClient.reportDevServer(args.service, args.firing, args.address));
   ipcMain.handle(IPC_CHANNELS.SENTINEL_SANDBOX, async (_event, args: SandboxAction) => sentinelClient.sandbox(args));
   ipcMain.handle(IPC_CHANNELS.SENTINEL_IMPACT, async (_event, args?: { base?: string }) => sentinelClient.impact(args?.base));
 

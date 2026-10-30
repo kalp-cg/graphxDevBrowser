@@ -19,6 +19,7 @@ def ingest_alertmanager(graph: Graph, payload: dict[str, Any]) -> dict[str, Any]
     batch = Batch()
     firing_uids: list[str] = []
     resolved_uids: list[str] = []
+    resolved_services: set[str] = set()
     affected_services: set[str] = set()
     now = now_ms()
 
@@ -65,12 +66,20 @@ def ingest_alertmanager(graph: Graph, payload: dict[str, Any]) -> dict[str, Any]
             }])
         else:
             resolved_uids.append(alert_uid)
+            resolved_services.add(svc_name)
             upsert(batch, "Alert", [{
                 "uid": alert_uid,
                 "status": "resolved",
             }])
 
     batch.send(graph)
+
+    # The monitoring system says it is over: a service with nothing else firing on it is healthy again. (Its callers recover below.)
+    if resolved_services:
+        still_firing = {e["to_id"].removeprefix("svc:") for a in graph.getVertices("Alert", select="status", where='status="firing"')
+                        for e in graph.getEdges("Alert", a["v_id"], "FIRED_ON")}
+        upsert(graph, "Service", [{"uid": f"svc:{n}", "status": "healthy", "root_fault": False}
+                                  for n in sorted(resolved_services - still_firing)])
 
     recovered: list[str] = []
     resolved_alerts: list[str] = []

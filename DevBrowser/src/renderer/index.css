@@ -265,3 +265,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   text-transform: uppercase;
   color: var(--text-muted);
 }
+
+.tab-scroller { scrollbar-width: none; }
+.tab-scroller::-webkit-scrollbar { display: none; }

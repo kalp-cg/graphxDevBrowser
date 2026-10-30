@@ -4,6 +4,14 @@ All notable changes. Versions follow [semantic versioning](https://semver.org/).
 
 ## Unreleased
 
+### Browser: tabs, and a dev server that dies
+- Tabs scroll and keep the active tab in view; they can be pinned, dragged to reorder, and right-clicked (reload, duplicate, pin, close
+  others, close to the right, reopen closed tab); double-click the empty strip for a new tab; the close button shows on hover.
+- **Dev server watch.** Every tab showing a local page is checked every 3 seconds. When its server stops answering (two failed checks in
+  a row, so a restart on a file change is not a crash) the tab turns red with a banner, a notification appears, and SentinelGraph gets an
+  alert on the service that owns that address. When the server returns the tab reloads itself and the alert clears.
+- Fixed: an Alertmanager alert that resolved left its service "degraded" forever.
+
 ### Scans any codebase (found by opening BitChat, a Swift app)
 - Opening a repository with no compose file and no JavaScript or Python manifests (BitChat, a Swift app) failed with "no services found".
   The scanner now recognises Swift, Kotlin, Java, Go, Rust, C#, C/C++, Dart, Ruby, PHP, Scala, Elixir and more, and a repository with no

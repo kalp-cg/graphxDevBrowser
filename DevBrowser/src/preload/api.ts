@@ -65,6 +65,8 @@ export interface DevBrowserAPI {
     aliases: () => Promise<Record<string, string>>;
     /** Which services the connected project's uncommitted changes touch, and what depends on them. */
     /** The 38-service test company and the exam that checks whether an agent finds what was broken in it. */
+    /** Tell SentinelGraph a dev server stopped (firing) or came back, on the service that owns that address. */
+    reportDevServer: (service: string, firing: boolean, address: string) => Promise<unknown>;
     sandbox: (args: SandboxAction) => Promise<SandboxState | unknown>;
     impact: (base?: string) => Promise<ImpactResult>;
     restoreHealthy: () => Promise<unknown>;
@@ -76,6 +78,8 @@ export interface DevBrowserAPI {
     onCommand: (callback: (command: BrowserCommand, arg?: string) => void) => () => void;
     emulate: (webContentsId: number, device: EmulatedDevice | null) => Promise<{ ok: boolean; error?: string }>;
     /** Slows or cuts one page's network (`none`, `fast-3g`, `slow-3g`, `offline`). */
+    /** Is anything answering at this origin? */
+    probe: (origin: string) => Promise<{ up: boolean }>;
     throttle: (webContentsId: number, preset: string) => Promise<{ ok: boolean; error?: string }>;
   };
 }

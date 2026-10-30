@@ -26,6 +26,9 @@ export interface Tab {
   /** Network throttling preset of this page (not kept across launches: the page itself is new). */
   throttle: string;
   error: PageError | null;
+  /** For a page served from localhost: is the server still answering? (see shared/domain/devserver.ts) */
+  devServer: 'unknown' | 'up' | 'down';
+  pinned: boolean;
 }
 
 export interface HistoryEntry {
@@ -52,6 +55,11 @@ interface BrowserState {
   newTab: (input?: string, profile?: string) => string;
   closeTab: (id: string) => void;
   reopenTab: () => void;
+  moveTab: (id: string, toIndex: number) => void;
+  togglePin: (id: string) => void;
+  duplicateTab: (id: string) => void;
+  closeOthers: (id: string) => void;
+  closeToRight: (id: string) => void;
   activate: (id: string) => void;
   activateIndex: (n: number) => void;
   cycle: (direction: 1 | -1) => void;
@@ -74,9 +82,13 @@ const newId = () => `tab-${Date.now().toString(36)}-${(counter++).toString(36)}`
 function makeTab(url: string, profile: string): Tab {
   return {
     id: newId(), initialUrl: url, url, title: fallbackTitle(url), loading: url !== 'about:blank',
-    canGoBack: false, canGoForward: false, profile, zoom: 1, device: null, rotated: false, throttle: 'none', error: null
+    canGoBack: false, canGoForward: false, profile, zoom: 1, device: null, rotated: false, throttle: 'none', error: null,
+    devServer: 'unknown', pinned: false
   };
 }
+
+/** Pinned tabs first, each group keeping its order. */
+const pinnedFirst = (tabs: Tab[]): Tab[] => [...tabs.filter(t => t.pinned), ...tabs.filter(t => !t.pinned)];
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -97,11 +109,11 @@ function write(key: string, value: unknown): void {
 
 /** Tabs from the last session (URL, profile, zoom), or one start page. */
 function restore(): { tabs: Tab[]; activeId: string } {
-  const saved = read<{ tabs: { url: string; title?: string; profile: string; zoom?: number }[]; active: number } | null>(
+  const saved = read<{ tabs: { url: string; title?: string; profile: string; zoom?: number; pinned?: boolean }[]; active: number } | null>(
     SESSION_KEY, null);
   const valid = (saved?.tabs ?? []).filter(t => typeof t.url === 'string' && PROFILES.some(p => p.key === t.profile));
   const tabs = valid.length
-    ? valid.map(t => ({ ...makeTab(t.url, t.profile), title: t.title || fallbackTitle(t.url), zoom: t.zoom ?? 1 }))
+    ? valid.map(t => ({ ...makeTab(t.url, t.profile), title: t.title || fallbackTitle(t.url), zoom: t.zoom ?? 1, pinned: !!t.pinned }))
     : [makeTab('about:blank', PROFILES[0]!.key)];
   return { tabs, activeId: tabs[Math.min(Math.max(saved?.active ?? 0, 0), tabs.length - 1)]!.id };
 }
@@ -159,6 +171,41 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
     set(state => ({ tabs: [...state.tabs, tab], activeId: tab.id, closed, split: null }));
   },
 
+  /** Drag a tab to a new place. Pinned tabs stay together on the left, whatever is dropped among them. */
+  moveTab: (id, toIndex) => set(state => {
+    const from = state.tabs.findIndex(t => t.id === id);
+    if (from < 0 || from === toIndex) return state;
+    const tabs = [...state.tabs];
+    const [tab] = tabs.splice(from, 1);
+    tabs.splice(Math.max(0, Math.min(toIndex, tabs.length)), 0, tab!);
+    return { tabs: pinnedFirst(tabs) };
+  }),
+
+  togglePin: id => set(state => ({
+    tabs: pinnedFirst(state.tabs.map(t => (t.id === id ? { ...t, pinned: !t.pinned } : t)))
+  })),
+
+  duplicateTab: id => set(state => {
+    const src = state.tabs.find(t => t.id === id);
+    if (!src) return state;
+    const copy = { ...makeTab(src.url, src.profile), title: src.title, zoom: src.zoom };
+    const at = state.tabs.findIndex(t => t.id === id) + 1;
+    return { tabs: [...state.tabs.slice(0, at), copy, ...state.tabs.slice(at)], activeId: copy.id, split: null };
+  }),
+
+  closeOthers: id => set(state => {
+    const keep = state.tabs.filter(t => t.id === id || t.pinned);
+    return { tabs: keep, activeId: id, split: null, closed: [...state.tabs.filter(t => !keep.includes(t)), ...state.closed].slice(0, MAX_CLOSED) };
+  }),
+
+  closeToRight: id => set(state => {
+    const at = state.tabs.findIndex(t => t.id === id);
+    const gone = state.tabs.filter((t, i) => i > at && !t.pinned);
+    const tabs = state.tabs.filter(t => !gone.includes(t));
+    return { tabs, activeId: tabs.some(t => t.id === state.activeId) ? state.activeId : id, split: null,
+      closed: [...gone, ...state.closed].slice(0, MAX_CLOSED) };
+  }),
+
   activate: id => set(state => ({
     activeId: id,
     split: state.split && !state.split.includes(id) ? null : state.split,
@@ -213,7 +260,7 @@ useBrowserStore.subscribe(state => {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     write(SESSION_KEY, {
-      tabs: state.tabs.map(t => ({ url: t.url, title: t.title, profile: t.profile, zoom: t.zoom })),
+      tabs: state.tabs.map(t => ({ url: t.url, title: t.title, profile: t.profile, zoom: t.zoom, pinned: t.pinned })),
       active: Math.max(0, state.tabs.findIndex(t => t.id === state.activeId))
     });
     write(HISTORY_KEY, state.history);
