@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, webContents } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeImage, shell, webContents } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +13,7 @@ import { CDPNetworkInterceptor } from './network/cdp-interceptor';
 import { SentinelGraphClient } from './integrations/sentinel-client';
 import { toTrafficRecord } from '../shared/domain/sentinel';
 import { IPC_CHANNELS, type BrowserCommand, type EmulatedDevice } from '../shared/ipc-channels';
-import { emulateDevice, installAppMenu, setupGuest } from './browser/chrome';
+import { emulateDevice, installAppMenu, setupGuest, throttleNetwork } from './browser/chrome';
 import { log } from './logger';
 import { loadWindowState, trackWindowState } from './window-state';
 
@@ -128,6 +128,12 @@ function sendCommand(command: BrowserCommand, arg?: string): void {
 
 app.whenReady().then(async () => {
   const envConfig = validateEnvironment({ ...process.env, NODE_ENV: process.env.NODE_ENV ?? (app.isPackaged ? 'production' : undefined) });
+  // From source, the Dock would show Electron's own icon; an installed build already has ours, and this is harmless there.
+  if (process.platform === 'darwin') {
+    const icon = nativeImage.createFromPath(path.join(__dirname, '../build/icon.png'));
+    if (icon.isEmpty()) log('warn', 'dock icon not found');
+    else app.dock?.setIcon(icon);
+  }
   log('info', `DevBrowser ${app.getVersion()} starting (${envConfig.NODE_ENV}, ${process.platform} ${process.arch}, electron ${process.versions.electron})`);
 
   partitionManager = new PartitionManager();
@@ -164,6 +170,17 @@ app.whenReady().then(async () => {
       if (!guest || guest.hostWebContents !== mainWindow?.webContents) return { ok: false, error: 'not a page of this window' };
       try {
         await emulateDevice(guest, args.device);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+  ipcMain.handle(IPC_CHANNELS.BROWSER_THROTTLE,
+    async (_event, args: { webContentsId: number; preset: string }) => {
+      const guest = webContents.fromId(args.webContentsId);
+      if (!guest || guest.hostWebContents !== mainWindow?.webContents) return { ok: false, error: 'not a page of this window' };
+      try {
+        await throttleNetwork(guest, args.preset);
         return { ok: true };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };

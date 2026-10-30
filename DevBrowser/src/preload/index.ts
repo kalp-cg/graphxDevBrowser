@@ -4,15 +4,12 @@ import type { DevBrowserAPI } from './api';
 import type { AIDebugContext } from '../shared/domain/ai';
 import type { NetworkTransaction } from '../shared/domain/network';
 import type { InvestigationEvidence } from '../shared/domain/sentinel';
+import type { ApiSendRequest } from '../shared/domain/api-client';
 
 const devBrowserAPI: DevBrowserAPI = {
   system: {
     getHardwareMetrics: () => ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_GET_HARDWARE_METRICS),
-    checkOllamaStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_CHECK_OLLAMA_STATUS),
-    checkTigerGraphStatus: (config?: { endpoint?: string; secret?: string; graphName?: string }) =>
-      ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_CHECK_TIGERGRAPH_STATUS, config),
-    executeTigerGraphQuery: (args: { endpoint: string; queryPath: string; method?: 'GET' | 'POST'; secret?: string; body?: unknown }) =>
-      ipcRenderer.invoke(IPC_CHANNELS.TIGERGRAPH_EXECUTE_QUERY, args)
+    checkOllamaStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_CHECK_OLLAMA_STATUS)
   },
   tabs: {
     createTab: (url: string, partitionKey?: string) =>
@@ -37,6 +34,9 @@ const devBrowserAPI: DevBrowserAPI = {
     executeDiagnosis: (context: AIDebugContext) =>
       ipcRenderer.invoke(IPC_CHANNELS.AI_EXECUTE_DIAGNOSIS, { context })
   },
+  apiClient: {
+    send: (request: ApiSendRequest) => ipcRenderer.invoke(IPC_CHANNELS.API_SEND, { request })
+  },
   security: {
     getFindings: () => ipcRenderer.invoke(IPC_CHANNELS.SECURITY_GET_FINDINGS),
     clearFindings: () => ipcRenderer.invoke(IPC_CHANNELS.SECURITY_CLEAR_FINDINGS)
@@ -54,7 +54,11 @@ const devBrowserAPI: DevBrowserAPI = {
     approveAction: (uid: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_APPROVE_ACTION, { uid }),
     rejectAction: (uid: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_REJECT_ACTION, { uid }),
     scanCodebase: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_SCAN_CODEBASE),
-    breakService: (service: string, kind: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_BREAK_SERVICE, { service, kind }),
+    breakService: (service: string, kind: string, additive?: boolean) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_BREAK_SERVICE, { service, kind, additive }),
+    aliases: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_ALIASES),
+    sandbox: (args: unknown) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_SANDBOX, args),
+    impact: (base?: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_IMPACT, { base }),
     restoreHealthy: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_RESTORE_HEALTHY)
   },
   privacy: {
@@ -69,7 +73,9 @@ const devBrowserAPI: DevBrowserAPI = {
       };
     },
     emulate: (webContentsId: number, device: EmulatedDevice | null) =>
-      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_EMULATE, { webContentsId, device })
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_EMULATE, { webContentsId, device }),
+    throttle: (webContentsId: number, preset: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_THROTTLE, { webContentsId, preset })
   }
 };
 

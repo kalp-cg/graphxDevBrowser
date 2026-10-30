@@ -2,6 +2,7 @@ import type { BrowserCommand, EmulatedDevice, HardwareMetrics } from '../shared/
 import type { BrowserTab, ProfilePartition } from '../shared/domain/browser';
 import type { SecurityFinding } from '../shared/domain/security';
 import type { ShredResult } from '../shared/domain/privacy';
+import type { ApiSendRequest, ApiSendResult } from '../shared/domain/api-client';
 import type { AIDebugContext, AICodeDiff } from '../shared/domain/ai';
 import type { NetworkTransaction } from '../shared/domain/network';
 import type {
@@ -9,6 +10,9 @@ import type {
   ChaosKind,
   ChaosResult,
   CodebaseScanResult,
+  ImpactResult,
+  SandboxAction,
+  SandboxState,
   SentinelAction,
   SentinelBlastRadius,
   SentinelResolution,
@@ -21,8 +25,6 @@ export interface DevBrowserAPI {
   system: {
     getHardwareMetrics: () => Promise<HardwareMetrics>;
     checkOllamaStatus: () => Promise<{ ok: boolean; model: string; message?: string }>;
-    checkTigerGraphStatus: (config?: { endpoint?: string; secret?: string; graphName?: string }) => Promise<{ ok: boolean; message: string; statusCode?: number; providerType?: string }>;
-    executeTigerGraphQuery: (args: { endpoint: string; queryPath: string; method?: 'GET' | 'POST'; secret?: string; body?: unknown }) => Promise<{ ok: boolean; data: unknown; status: number; durationMs: number; error?: string }>;
   };
   tabs: {
     createTab: (url: string, partitionKey?: string) => Promise<BrowserTab>;
@@ -35,6 +37,10 @@ export interface DevBrowserAPI {
   };
   ai: {
     executeDiagnosis: (context: AIDebugContext) => Promise<{ diagnosis: string; suggestedDiff?: AICodeDiff }>;
+  };
+  apiClient: {
+    /** Sends from the main process; never throws: a failure is a result with `ok: false` and an `error`. */
+    send: (request: ApiSendRequest) => Promise<ApiSendResult>;
   };
   security: {
     getFindings: () => Promise<SecurityFinding[]>;
@@ -54,7 +60,13 @@ export interface DevBrowserAPI {
     /** Opens a folder dialog and scans the chosen repository; null if cancelled. */
     scanCodebase: () => Promise<CodebaseScanResult | null>;
     /** Simulate a failure of a service in the graph. */
-    breakService: (service: string, kind: ChaosKind) => Promise<ChaosResult>;
+    breakService: (service: string, kind: ChaosKind, additive?: boolean) => Promise<ChaosResult>;
+    /** The addresses each service answers on (`localhost:3000` is `app`). */
+    aliases: () => Promise<Record<string, string>>;
+    /** Which services the connected project's uncommitted changes touch, and what depends on them. */
+    /** The 38-service test company and the exam that checks whether an agent finds what was broken in it. */
+    sandbox: (args: SandboxAction) => Promise<SandboxState | unknown>;
+    impact: (base?: string) => Promise<ImpactResult>;
     restoreHealthy: () => Promise<unknown>;
   };
   privacy: {
@@ -63,5 +75,7 @@ export interface DevBrowserAPI {
   browser: {
     onCommand: (callback: (command: BrowserCommand, arg?: string) => void) => () => void;
     emulate: (webContentsId: number, device: EmulatedDevice | null) => Promise<{ ok: boolean; error?: string }>;
+    /** Slows or cuts one page's network (`none`, `fast-3g`, `slow-3g`, `offline`). */
+    throttle: (webContentsId: number, preset: string) => Promise<{ ok: boolean; error?: string }>;
   };
 }

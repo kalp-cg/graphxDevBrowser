@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  DEVICES, PROFILES, SEARCH_URL, displayUrl, fallbackTitle, siteSecurity, stepZoom, toNavigableUrl
+  DEVICES, PROFILES, SEARCH_URL, canBookmark, isBookmarked, toggleBookmark, displayUrl, fallbackTitle, siteSecurity, stepZoom, toNavigableUrl
 } from '../../src/shared/domain/browser';
 import { summarizeRun } from '../../src/shared/domain/sentinel';
 
@@ -70,5 +70,27 @@ describe('agent path on the graph', () => {
       { type: 'tool_result', name: 'x', node_uids: ['svc:a'] }, { type: 'final', root_cause: 'a' }] });
     expect(done.path.nodes).toEqual(['svc:a']);
     expect(done.path.currentNodes).toEqual([]); // nothing "in progress" once the run ends
+  });
+});
+
+
+describe('bookmarks', () => {
+  it('toggles a page on and off, newest first, ignoring a trailing slash and the fragment', () => {
+    let list = toggleBookmark([], 'http://localhost:3000/docs/', 'Docs', 1);
+    list = toggleBookmark(list, 'https://example.com/', '  ', 2);
+    expect(list.map(b => [b.url, b.title])).toEqual([['https://example.com/', 'example.com'], ['http://localhost:3000/docs/', 'Docs']]);
+    expect(isBookmarked(list, 'http://localhost:3000/docs#intro')).toBe(true);
+    expect(isBookmarked(list, 'http://localhost:3000/docs/other')).toBe(false);
+    expect(toggleBookmark(list, 'http://localhost:3000/docs', 'Docs').map(b => b.url)).toEqual(['https://example.com/']);
+  });
+
+  it('only bookmarks web pages, and keeps a bounded list', () => {
+    expect(canBookmark('about:blank')).toBe(false);
+    expect(toggleBookmark([], 'about:blank', 'x')).toEqual([]);
+    expect(toggleBookmark([], 'file:///etc/passwd', 'x')).toEqual([]);
+    let list: ReturnType<typeof toggleBookmark> = [];
+    for (let i = 0; i < 230; i++) list = toggleBookmark(list, `http://h.dev/${i}`, `p${i}`, i);
+    expect(list).toHaveLength(200);
+    expect(list[0]!.url).toBe('http://h.dev/229');
   });
 });

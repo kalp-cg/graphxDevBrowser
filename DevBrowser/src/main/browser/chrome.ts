@@ -1,3 +1,4 @@
+import { throttleConditions } from '../../shared/domain/browser';
 import { clipboard, Menu, type MenuItemConstructorOptions, type WebContents } from 'electron';
 import type { BrowserCommand, EmulatedDevice } from '../../shared/ipc-channels';
 
@@ -19,6 +20,7 @@ export function installAppMenu(send: CommandSink, toggleAppDevTools: () => void)
       submenu: [
         cmd('New Tab', 'new-tab', 'CmdOrCtrl+T'),
         cmd('Reopen Closed Tab', 'reopen-tab', 'CmdOrCtrl+Shift+T'),
+        cmd('Bookmark This Page', 'bookmark', 'CmdOrCtrl+D'),
         cmd('Open Location', 'focus-address', 'CmdOrCtrl+L'),
         { type: 'separator' },
         cmd('Close Tab', 'close-tab', 'CmdOrCtrl+W'),
@@ -130,6 +132,14 @@ export function setupGuest(guest: WebContents, send: CommandSink): void {
  * Emulation.setEmitTouchEventsForMouse: it leaks into the host window's input, and clicks on the app's own
  * controls stop completing (both seen on Electron 33).
  */
+/** Slows or cuts a page's network the way DevTools' throttling does. Lasts until changed or the page is closed. */
+export async function throttleNetwork(guest: WebContents, presetId: string): Promise<void> {
+  const dbg = guest.debugger;
+  if (!dbg.isAttached()) dbg.attach('1.3');
+  await dbg.sendCommand('Network.enable');
+  await dbg.sendCommand('Network.emulateNetworkConditions', throttleConditions(presetId));
+}
+
 export async function emulateDevice(guest: WebContents, device: EmulatedDevice | null): Promise<void> {
   const dbg = guest.debugger;
   if (!dbg.isAttached()) dbg.attach('1.3');

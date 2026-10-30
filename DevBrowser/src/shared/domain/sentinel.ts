@@ -79,6 +79,48 @@ export interface CodebaseScanResult {
   replaced?: boolean;
 }
 
+/** `POST /api/impact`: which services a change touches, and what depends on them. The risk level is a heuristic. */
+export interface ImpactResult {
+  files: number;
+  changed: { name: string; tier: string; kind: string; team: string | null; files: string[]; dependents: number; dependent_names: string[] }[];
+  affected: { name: string; tier: string; hops: number; via: string[] }[];
+  unmapped_files: string[];
+  services_total: number;
+  risk: 'none' | 'low' | 'medium' | 'high';
+  risk_reason: string;
+  risk_is_a_heuristic: boolean;
+}
+
+/** `GET /api/sandbox`: the 30-40 service test company and the exam that asks an agent to find what we broke in it. */
+export interface SandboxCompany {
+  services: number; databases: number; teams: number; engineers: number; deployments: number; commits: number;
+  past_incidents: number; dependencies: number;
+}
+
+export interface SandboxCaseResult {
+  id: string; title: string; difficulty: 'easy' | 'medium' | 'hard'; expected: string[]; found: string[];
+  outcome: 'correct' | 'false-alarm' | 'missed' | 'extra' | 'partial' | 'wrong' | 'timeout';
+  correct: boolean; why: string; seconds: number; steps: number; confidence: string | null; provider: string | null; fallback: boolean;
+}
+
+export interface SandboxState {
+  loaded: boolean;
+  company: SandboxCompany | null;
+  providers: string[];
+  running: boolean;
+  exam: {
+    status: 'idle' | 'starting' | 'running' | 'done' | 'cancelled' | 'error';
+    provider: string | null; total: number; done: number; current: { id: string; title: string } | null;
+    results: SandboxCaseResult[]; error?: string | null;
+    summary: { cases: number; correct: number; accuracy: number | null; false_alarms: number; seconds: number;
+      fell_back_to_builtin: number; answered_by_chosen: number; accuracy_of_chosen: number | null } | null;
+  };
+}
+
+export type SandboxAction =
+  | { action: 'state' } | { action: 'load' } | { action: 'cancel' }
+  | { action: 'test'; provider?: string; cases?: number };
+
 /** How a service is broken for a demo: crashed or slowed, with or without a bad deploy as the cause. */
 export type ChaosKind = 'deploy' | 'crash' | 'degrade';
 
@@ -266,6 +308,11 @@ export interface SentinelRunEvent {
   report?: string;
   message?: string;
   root_cause?: string | null;
+  /** Every failure the agent found: more than one when separate things are broken at once. */
+  root_causes?: string[];
+  /** `high`, `medium` or `low`, from how many independent pieces of evidence agree; with the reasons. Not a probability. */
+  confidence?: 'high' | 'medium' | 'low' | null;
+  confidence_reason?: string | null;
   seconds?: number;
   actions?: SentinelAction[];
   action?: SentinelAction;
@@ -284,6 +331,9 @@ export interface RunSummary {
   phase: 'idle' | 'running' | 'done' | 'failed';
   steps: { name: string; summary: string; error: boolean }[];
   rootCause: string | null;
+  rootCauses: string[];
+  confidence: 'high' | 'medium' | 'low' | null;
+  confidenceReason: string | null;
   report: string | null;
   seconds: number | null;
   proposed: SentinelAction[];
@@ -303,7 +353,7 @@ const CONTEXT_TOOLS = new Set(['critical_services', 'chokepoints']);
 
 export function summarizeRun(run: SentinelRun | null): RunSummary {
   const path = { nodes: [] as string[], edges: [] as string[], currentNodes: [] as string[], currentEdges: [] as string[] };
-  const empty: RunSummary = { phase: 'idle', steps: [], rootCause: null, report: null, seconds: null, proposed: [], path };
+  const empty: RunSummary = { phase: 'idle', steps: [], rootCause: null, rootCauses: [], confidence: null, confidenceReason: null, report: null, seconds: null, proposed: [], path };
   if (!run || !run.run_id) return empty;
   const results = run.events.filter(e => e.type === 'tool_result');
   const steps = results.map(e => ({ name: e.name ?? '', summary: e.summary ?? '', error: Boolean(e.error) }));
@@ -319,8 +369,96 @@ export function summarizeRun(run: SentinelRun | null): RunSummary {
   const end = run.events[run.events.length - 1];
   if (end?.type === 'error') return { ...empty, phase: 'failed', steps, path, report: end.message ?? 'Investigation failed' };
   if (end?.type === 'final') {
-    return { phase: 'done', steps, rootCause: end.root_cause ?? null, report: end.report ?? null,
+    const rootCauses = end.root_causes?.length ? end.root_causes : end.root_cause ? [end.root_cause] : [];
+    return { phase: 'done', steps, rootCause: end.root_cause ?? null, rootCauses, confidence: end.confidence ?? null,
+      confidenceReason: end.confidence_reason ?? null, report: end.report ?? null,
       seconds: end.seconds ?? null, proposed, path: { ...path, currentNodes: [], currentEdges: [] } };
   }
   return { ...empty, phase: 'running', steps, proposed, path };
+}
+
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '0.0.0.0', '[::1]']);
+
+/** `http://127.0.0.1:7004/x` is `localhost:7004`: every spelling of the local machine is one host. */
+export function hostOf(url: string): string {
+  try {
+    const u = new URL(url);
+    const name = u.hostname.toLowerCase();
+    return `${LOOPBACK.has(name) ? 'localhost' : name}${u.port ? `:${u.port}` : ''}`;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The service a URL belongs to, given the workspace's addresses (the same rule as the server's `resolve`): the longest path
+ * prefix first (`localhost:3000/api/orders` is the module `api.orders`), then the host.
+ */
+export function serviceOfUrl(url: string, aliases: Record<string, string>): string | null {
+  const host = hostOf(url);
+  if (!host) return null;
+  let parts: string[] = [];
+  try {
+    parts = new URL(url).pathname.split('/').filter(Boolean);
+  } catch {
+    // no path
+  }
+  for (let n = parts.length; n > 0; n--) {
+    const hit = aliases[`${host}/${parts.slice(0, n).join('/')}`];
+    if (hit) return hit;
+  }
+  return aliases[host] ?? null;
+}
+
+/** The `localhost:PORT` addresses a service answers on: where to open it. */
+export function localAddressesOf(service: string, aliases: Record<string, string>): string[] {
+  return Object.entries(aliases)
+    .filter(([addr, name]) => name === service && /^localhost:\d+$/.test(addr))
+    .map(([addr]) => addr).sort();
+}
+
+/**
+ * An OpenTelemetry Collector configuration that sends traces to this SentinelGraph server. Traces are what turn the map from
+ * "what the code declares" into "what really happens, and what is failing": each service's calls, errors and who it calls.
+ */
+export function otelCollectorConfig(serverUrl: string): string {
+  const base = serverUrl.trim().replace(/\/+$/, '');
+  return `# otel-collector.yaml: send traces from your services to SentinelGraph.
+# Run:  docker run --rm -p 4317:4317 -p 4318:4318 -v $PWD/otel-collector.yaml:/etc/otelcol-contrib/config.yaml otel/opentelemetry-collector-contrib
+# Then point your services' OpenTelemetry SDK at http://localhost:4318 (OTLP/HTTP) or localhost:4317 (gRPC).
+# Each service must set service.name to the name shown on the map (OTEL_SERVICE_NAME=checkout).
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+processors:
+  batch:
+    timeout: 2s
+exporters:
+  otlphttp/sentinelgraph:
+    traces_endpoint: ${base}/v1/traces
+    encoding: json
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/sentinelgraph]
+`;
+}
+
+/** A Prometheus Alertmanager receiver that sends firing and resolved alerts to this SentinelGraph server. */
+export function alertmanagerReceiver(serverUrl: string): string {
+  const base = serverUrl.trim().replace(/\/+$/, '');
+  return `# alertmanager.yml: add this receiver, and route alerts to it. Label each alert with the service it is about
+# (service: checkout, or app / job).
+receivers:
+  - name: sentinelgraph
+    webhook_configs:
+      - url: ${base}/api/alerts/alertmanager
+        send_resolved: true
+`;
 }

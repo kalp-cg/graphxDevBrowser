@@ -4,6 +4,9 @@ import type {
   ChaosKind,
   ChaosResult,
   CodebaseScanResult,
+  ImpactResult,
+  SandboxAction,
+  SandboxState,
   SentinelAction,
   SentinelBlastRadius,
   SentinelResolution,
@@ -126,9 +129,29 @@ export class SentinelGraphClient {
   }
 
   /** Simulate a failure in the graph (nothing real is touched): the service goes down or degraded and its callers alert. */
-  public breakService(service: string, kind: ChaosKind): Promise<ChaosResult> {
+  public breakService(service: string, kind: ChaosKind, additive = false): Promise<ChaosResult> {
     const mode = kind === 'degrade' ? 'degraded' : 'down';
-    return this.request('POST', `/api/chaos/${encodeURIComponent(service)}?mode=${mode}&deploy=${kind === 'deploy'}`);
+    return this.request('POST', `/api/chaos/${encodeURIComponent(service)}?mode=${mode}&deploy=${kind === 'deploy'}${additive ? '&additive=true' : ''}`);
+  }
+
+  /** The addresses each service answers on, from the last codebase scan. */
+  public async aliases(): Promise<Record<string, string>> {
+    return (await this.request<{ aliases?: Record<string, string> }>('GET', '/api/workspace')).aliases ?? {};
+  }
+
+  /** Which services the connected project's uncommitted changes (or the branch since `base`) touch, and what depends on them. */
+  public impact(base?: string): Promise<ImpactResult> {
+    return this.request('POST', '/api/impact', base ? { base } : {});
+  }
+
+  /** The sandbox company and its exam: read the state, load the company, start or cancel a test. */
+  public sandbox(a: SandboxAction): Promise<SandboxState | unknown> {
+    switch (a.action) {
+      case 'load': return this.request('POST', '/api/sandbox/load');
+      case 'test': return this.request('POST', '/api/sandbox/test', { provider: a.provider, cases: a.cases ?? 12 });
+      case 'cancel': return this.request('DELETE', '/api/sandbox/test');
+      default: return this.request('GET', '/api/sandbox');
+    }
   }
 
   /** Back to a healthy system; what the agent has learned is kept. */
@@ -175,7 +198,7 @@ export class SentinelGraphClient {
     this.timer = null;
   }
 
-  private async request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+  private async request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
     if (!this.isConfigured()) throw new Error('SentinelGraph API URL is not set');
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -187,7 +210,14 @@ export class SentinelGraphClient {
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
-      throw new Error(`SentinelGraph ${method} ${path}: HTTP ${res.status}${detail ? ` ${detail.slice(0, 200)}` : ''}`);
+      let readable = detail;
+      try {
+        const parsed = JSON.parse(detail) as { detail?: unknown };
+        if (typeof parsed.detail === 'string') readable = parsed.detail; // the server's own sentence, not a JSON blob
+      } catch {
+        // not JSON: show it as it is
+      }
+      throw new Error(`SentinelGraph ${method} ${path}: HTTP ${res.status}${readable ? ` ${readable.slice(0, 300)}` : ''}`);
     }
     return await res.json() as T;
   }

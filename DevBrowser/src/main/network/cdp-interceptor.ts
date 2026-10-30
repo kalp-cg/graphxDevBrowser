@@ -90,6 +90,7 @@ export class CDPNetworkInterceptor {
           headers: Record<string, string>;
           mimeType: string;
           protocol?: string;
+          timing?: NetworkTransaction['timing'];
         };
       };
 
@@ -108,6 +109,7 @@ export class CDPNetworkInterceptor {
       pending.responseHeaders = p.response.headers;
       pending.mimeType = p.response.mimeType;
       pending.protocol = p.response.protocol;
+      pending.timing = p.response.timing;
 
       this.pendingRequests.set(p.requestId, pending);
 

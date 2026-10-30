@@ -153,3 +153,45 @@ export function forSite<T extends { pageUrl?: string }>(items: T[], currentUrl: 
   const site = siteOf(currentUrl);
   return site ? items.filter(i => siteOf(i.pageUrl) === site) : [];
 }
+
+/** DevTools' network presets: throughput in kilobits per second, latency in milliseconds. */
+export const THROTTLES = [
+  { id: 'none', label: 'No throttling', offline: false, down: -1, up: -1, latency: 0 },
+  { id: 'fast-3g', label: 'Fast 3G', offline: false, down: 1600, up: 750, latency: 562.5 },
+  { id: 'slow-3g', label: 'Slow 3G', offline: false, down: 400, up: 400, latency: 2000 },
+  { id: 'offline', label: 'Offline', offline: true, down: 0, up: 0, latency: 0 }
+] as const;
+export type ThrottleId = (typeof THROTTLES)[number]['id'];
+
+/** The Chrome DevTools Protocol `Network.emulateNetworkConditions` parameters for a preset (bytes per second). */
+export function throttleConditions(id: string): { offline: boolean; latency: number; downloadThroughput: number; uploadThroughput: number } {
+  const t = THROTTLES.find(p => p.id === id) ?? THROTTLES[0];
+  const bytes = (kbps: number) => (kbps < 0 ? -1 : Math.round((kbps * 1000) / 8));
+  return { offline: t.offline, latency: t.latency, downloadThroughput: bytes(t.down), uploadThroughput: bytes(t.up) };
+}
+
+export interface Bookmark {
+  url: string;
+  title: string;
+  at: number;
+}
+
+const bookmarkKey = (url: string) => url.replace(/#.*$/, '').replace(/\/$/, '');
+
+export const MAX_BOOKMARKS = 200;
+
+/** A page can be bookmarked; web pages only, and the address ignores a trailing slash and the #fragment. */
+export function canBookmark(url: string): boolean {
+  return /^https?:\/\//i.test(url);
+}
+
+export function isBookmarked(list: Bookmark[], url: string): boolean {
+  return list.some(b => bookmarkKey(b.url) === bookmarkKey(url));
+}
+
+/** Adds the page at the top, or removes it if it is already there. */
+export function toggleBookmark(list: Bookmark[], url: string, title: string, at = Date.now()): Bookmark[] {
+  if (!canBookmark(url)) return list;
+  if (isBookmarked(list, url)) return list.filter(b => bookmarkKey(b.url) !== bookmarkKey(url));
+  return [{ url, title: title.trim() || fallbackTitle(url), at }, ...list].slice(0, MAX_BOOKMARKS);
+}

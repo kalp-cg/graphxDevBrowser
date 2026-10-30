@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, net, session } from 'electron';
 import os from 'node:os';
 import { IPC_CHANNELS, type HardwareMetrics } from '../../shared/ipc-channels';
 import type { PartitionManager } from '../session/partition-manager';
@@ -10,7 +10,9 @@ import { OllamaClient } from '../ai/ollama-client';
 import { CredentialVault } from '../crypto/vault';
 import { PassiveSecurityAuditor } from '../security/auditor';
 import type { SentinelGraphClient } from '../integrations/sentinel-client';
-import type { ChaosKind, InvestigationEvidence } from '../../shared/domain/sentinel';
+import type { ChaosKind, InvestigationEvidence, SandboxAction } from '../../shared/domain/sentinel';
+import type { ApiSendRequest } from '../../shared/domain/api-client';
+import { sendApiRequest } from '../network/api-client';
 
 const BROWSING_PARTITIONS = PROFILES.map(p => p.key);
 
@@ -56,149 +58,6 @@ export function registerIpcHandlers(
     };
   });
 
-  // 3. TigerGraph live REST++ health probe (Supports TGCloud HTTPS and Self-Hosted HTTP)
-  ipcMain.handle(IPC_CHANNELS.SYSTEM_CHECK_TIGERGRAPH_STATUS, async (_event, args?: { endpoint?: string; secret?: string; graphName?: string }) => {
-    let rawEndpoint = (args?.endpoint || 'http://127.0.0.1:9000').trim().replace(/\/$/, '');
-    if (!rawEndpoint.startsWith('http://') && !rawEndpoint.startsWith('https://')) {
-      rawEndpoint = `https://${rawEndpoint}`;
-    }
-    const isTgCloud = rawEndpoint.includes('tgcloud.io');
-    const secret = args?.secret?.trim();
-
-    try {
-      const headers: Record<string, string> = {
-        'Accept': 'application/json, text/plain, */*'
-      };
-      if (secret) {
-        headers['Authorization'] = `Bearer ${secret}`;
-      }
-
-      let res: Response | null = null;
-      try {
-        res = await fetch(`${rawEndpoint}/restpp/echo`, {
-          signal: AbortSignal.timeout(4000),
-          headers
-        });
-      } catch {
-        // fallback to /echo
-      }
-
-      if (!res || res.status === 404) {
-        try {
-          res = await fetch(`${rawEndpoint}/echo`, {
-            signal: AbortSignal.timeout(4000),
-            headers
-          });
-        } catch {
-          // network error
-        }
-      }
-
-      if (res && res.status === 200) {
-        return {
-          ok: true,
-          statusCode: 200,
-          providerType: isTgCloud ? 'tgcloud' : 'self-hosted',
-          message: isTgCloud 
-            ? `Connected to TigerGraph Cloud (${new URL(rawEndpoint).hostname})`
-            : 'TigerGraph REST++ is online and ready (HTTP 200 OK)'
-        };
-      } else if (res && res.status === 502) {
-        return {
-          ok: false,
-          statusCode: 502,
-          message: 'HTTP 502 Bad Gateway: NGINX is online, but RESTPP/GSE engines are warming up or waiting for license (gadmin license set).'
-        };
-      } else if (res && (res.status === 401 || res.status === 403)) {
-        return {
-          ok: false,
-          statusCode: res.status,
-          message: `HTTP ${res.status} Authentication Failed. Check your TGCloud API Token or Secret.`
-        };
-      } else if (res) {
-        return {
-          ok: false,
-          statusCode: res.status,
-          message: `TigerGraph returned HTTP ${res.status} ${res.statusText}`
-        };
-      } else {
-        return {
-          ok: false,
-          message: 'Could not reach TigerGraph endpoint. Verify host URL.'
-        };
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('aborted') || msg.includes('timeout')) {
-        return { ok: false, message: 'Connection timed out after 4000ms. Check endpoint URL or network access.' };
-      }
-      return { ok: false, message: `Connection error: ${msg}. Verify host URL.` };
-    }
-  });
-
-  // 4. TigerGraph query execution (REST++ / GSQL)
-  ipcMain.handle(IPC_CHANNELS.TIGERGRAPH_EXECUTE_QUERY, async (_event, args: {
-    endpoint: string;
-    queryPath: string;
-    method?: 'GET' | 'POST';
-    secret?: string;
-    body?: unknown;
-  }) => {
-    let rawEndpoint = (args.endpoint || 'http://127.0.0.1:9000').trim().replace(/\/$/, '');
-    if (!rawEndpoint.startsWith('http://') && !rawEndpoint.startsWith('https://')) {
-      rawEndpoint = `https://${rawEndpoint}`;
-    }
-    const cleanPath = args.queryPath.startsWith('/') ? args.queryPath : `/${args.queryPath}`;
-    const targetUrl = `${rawEndpoint}${cleanPath}`;
-    const startTime = Date.now();
-
-    try {
-      const headers: Record<string, string> = {
-        'Accept': 'application/json, text/plain, */*'
-      };
-      if (args.secret?.trim()) {
-        headers['Authorization'] = `Bearer ${args.secret.trim()}`;
-      }
-      if (args.body && args.method === 'POST') {
-        headers['Content-Type'] = 'application/json';
-      }
-
-      const res = await fetch(targetUrl, {
-        method: args.method || 'GET',
-        headers,
-        body: args.body && args.method === 'POST' ? JSON.stringify(args.body) : undefined,
-        signal: AbortSignal.timeout(8000)
-      });
-
-      const durationMs = Date.now() - startTime;
-      const text = await res.text();
-      let parsedData: unknown;
-      try {
-        parsedData = JSON.parse(text);
-      } catch {
-        parsedData = text;
-      }
-
-      return {
-        ok: res.ok,
-        status: res.status,
-        durationMs,
-        data: parsedData,
-        error: !res.ok ? `HTTP ${res.status}: ${res.statusText}` : undefined
-      };
-    } catch (err: unknown) {
-      const durationMs = Date.now() - startTime;
-      const msg = err instanceof Error ? err.message : String(err);
-      return {
-        ok: false,
-        status: 0,
-        durationMs,
-        data: null,
-        error: `Query error: ${msg}`
-      };
-    }
-  });
-
   // 5. SentinelGraph: the TigerGraph-backed dependency graph.
   ipcMain.handle(IPC_CHANNELS.SENTINEL_CONFIGURE, async (_event, args: { baseUrl: string }) => {
     sentinelClient.configure(args.baseUrl);
@@ -239,8 +98,17 @@ export function registerIpcHandlers(
     return sentinelClient.scanCodebase(picked.filePaths[0]);
   });
 
-  ipcMain.handle(IPC_CHANNELS.SENTINEL_BREAK_SERVICE, async (_event, args: { service: string; kind: ChaosKind }) =>
-    sentinelClient.breakService(args.service, args.kind));
+  // The API client sends from here, not from the page, so CORS never gets in the way of testing your own API.
+  ipcMain.handle(IPC_CHANNELS.API_SEND, async (_event, args: { request: ApiSendRequest }) =>
+    sendApiRequest(args.request, net.fetch as unknown as typeof fetch));
+
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_BREAK_SERVICE, async (_event, args: { service: string; kind: ChaosKind; additive?: boolean }) =>
+    sentinelClient.breakService(args.service, args.kind, args.additive));
+
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_ALIASES, async () => sentinelClient.aliases());
+
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_SANDBOX, async (_event, args: SandboxAction) => sentinelClient.sandbox(args));
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_IMPACT, async (_event, args?: { base?: string }) => sentinelClient.impact(args?.base));
 
   ipcMain.handle(IPC_CHANNELS.SENTINEL_RESTORE_HEALTHY, async () => sentinelClient.restoreHealthy());
 

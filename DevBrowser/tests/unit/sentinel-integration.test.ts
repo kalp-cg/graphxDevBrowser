@@ -6,6 +6,11 @@ import {
   toDevBrowserGraph,
   toEvidence,
   toTrafficRecord,
+  otelCollectorConfig,
+  alertmanagerReceiver,
+  hostOf,
+  serviceOfUrl,
+  localAddressesOf,
   type SentinelSnapshot
 } from '../../src/shared/domain/sentinel';
 import {
@@ -137,6 +142,21 @@ describe('SentinelGraphClient', () => {
     expect(JSON.parse(calls[0]!.init.body as string)).toEqual({ path: '/work/shop' });
     await expect(client.scanCodebase('/nope')).rejects.toThrow(/HTTP 422.*not a directory/);
     client.dispose();
+  });
+
+  it('loads the sandbox company and starts, reads and stops its exam', async () => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: { loaded: false } }, { status: 200, body: { services: 38 } },
+      { status: 200, body: { started: true } }, { status: 200, body: { cancelled: true } }]);
+    const client = new SentinelGraphClient(impl);
+    client.configure('http://localhost:8100');
+    await client.sandbox({ action: 'state' });
+    await client.sandbox({ action: 'load' });
+    await client.sandbox({ action: 'test', provider: 'ollama', cases: 12 });
+    await client.sandbox({ action: 'cancel' });
+    client.dispose();
+    expect(calls.map(c => `${c.init.method} ${c.url.replace('http://localhost:8100', '')}`)).toEqual(
+      ['GET /api/sandbox', 'POST /api/sandbox/load', 'POST /api/sandbox/test', 'DELETE /api/sandbox/test']);
+    expect(JSON.parse(calls[2]!.init.body as string)).toEqual({ provider: 'ollama', cases: 12 });
   });
 
   it('breaks a service the way the dashboard does, and restores a healthy system', async () => {
@@ -322,5 +342,31 @@ describe('SentinelGraphClient integration surface', () => {
       ['POST', 'http://localhost:8200/api/actions/act%3Acd34/reject'],
       ['GET', 'http://localhost:8200/api/runs/current']
     ]);
+  });
+});
+
+
+describe('wiring real data in', () => {
+  it('writes a collector config that exports traces to the connected server', () => {
+    const cfg = otelCollectorConfig('http://127.0.0.1:8100/');
+    expect(cfg).toContain('traces_endpoint: http://127.0.0.1:8100/v1/traces');
+    expect(cfg).toContain('encoding: json');                       // the server takes OTLP/JSON
+    expect(cfg).toMatch(/exporters: \[otlphttp\/sentinelgraph\]/);
+    expect(cfg).toContain('OTEL_SERVICE_NAME');
+    expect(alertmanagerReceiver('https://sg.example.com')).toContain('url: https://sg.example.com/api/alerts/alertmanager');
+  });
+
+  it('matches a URL to a service the way the server does: longest path prefix, then the host', () => {
+    const aliases = { 'localhost:3000': 'app', 'localhost:3000/api/orders': 'api.orders', 'checkout:8000': 'checkout' };
+    expect(serviceOfUrl('http://127.0.0.1:3000/api/orders/9?x=1', aliases)).toBe('api.orders');
+    expect(serviceOfUrl('http://localhost:3000/api/other', aliases)).toBe('app');
+    expect(serviceOfUrl('http://0.0.0.0:3000/', aliases)).toBe('app');
+    expect(serviceOfUrl('http://checkout:8000/pay', aliases)).toBe('checkout');
+    expect(serviceOfUrl('https://api.stripe.com/v1', aliases)).toBeNull();
+    expect(serviceOfUrl('not a url', aliases)).toBeNull();
+    expect(hostOf('http://[::1]:5173/x')).toBe('localhost:5173');
+    expect(hostOf('https://Example.COM/a')).toBe('example.com');
+    expect(localAddressesOf('app', aliases)).toEqual(['localhost:3000']);
+    expect(localAddressesOf('checkout', aliases)).toEqual([]);   // not a local address: nothing to open
   });
 });

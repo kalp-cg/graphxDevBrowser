@@ -2,8 +2,6 @@ export const IPC_CHANNELS = {
   // System & Window
   SYSTEM_GET_HARDWARE_METRICS: 'devbrowser:system:getHardwareMetrics',
   SYSTEM_CHECK_OLLAMA_STATUS: 'devbrowser:system:checkOllamaStatus',
-  SYSTEM_CHECK_TIGERGRAPH_STATUS: 'devbrowser:system:checkTigerGraphStatus',
-  TIGERGRAPH_EXECUTE_QUERY: 'devbrowser:tigergraph:executeQuery',
 
   // Browser Tabs & Partitions
   TABS_CREATE: 'devbrowser:tabs:create',
@@ -35,11 +33,16 @@ export const IPC_CHANNELS = {
   // Browser chrome: menu shortcuts and page events from the main process, device emulation into it
   BROWSER_COMMAND: 'devbrowser:browser:command',
   BROWSER_EMULATE: 'devbrowser:browser:emulate',
+  BROWSER_THROTTLE: 'devbrowser:browser:throttle',
   SENTINEL_RESOLVE: 'devbrowser:sentinel:resolve',
   SENTINEL_CURRENT_RUN: 'devbrowser:sentinel:currentRun',
   SENTINEL_APPROVE_ACTION: 'devbrowser:sentinel:approveAction',
   SENTINEL_REJECT_ACTION: 'devbrowser:sentinel:rejectAction',
   SENTINEL_SCAN_CODEBASE: 'devbrowser:sentinel:scanCodebase',
+  API_SEND: 'devbrowser:api:send',
+  SENTINEL_IMPACT: 'devbrowser:sentinel:impact',
+  SENTINEL_SANDBOX: 'devbrowser:sentinel:sandbox',
+  SENTINEL_ALIASES: 'devbrowser:sentinel:aliases',
   SENTINEL_BREAK_SERVICE: 'devbrowser:sentinel:breakService',
   SENTINEL_RESTORE_HEALTHY: 'devbrowser:sentinel:restoreHealthy',
 
@@ -59,7 +62,7 @@ export interface HardwareMetrics {
 
 /** A browser action routed from the app menu, a page's context menu or a popup to the renderer. */
 export type BrowserCommand =
-  | 'new-tab' | 'close-tab' | 'reopen-tab' | 'open-tab' | 'search' | 'select-tab' | 'next-tab' | 'prev-tab'
+  | 'bookmark' | 'new-tab' | 'close-tab' | 'reopen-tab' | 'open-tab' | 'search' | 'select-tab' | 'next-tab' | 'prev-tab'
   | 'focus-address' | 'reload' | 'hard-reload' | 'back' | 'forward' | 'find'
   | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'toggle-device' | 'toggle-split' | 'toggle-panel'
   | 'page-devtools' | 'command-palette';
