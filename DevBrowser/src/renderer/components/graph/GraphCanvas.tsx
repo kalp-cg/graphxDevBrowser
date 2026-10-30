@@ -158,11 +158,11 @@ export const GraphCanvas: React.FC<Props> = ({ nodes, links, highlight, showCont
   useEffect(() => {
     if (fitKey) userMoved.current = false;
     if (fitKey || (fitted.current && !userMoved.current)) {
-      const t = setTimeout(() => fit(400), 120);
+      const t = setTimeout(() => fit(400), 450); // after the force layout has had time to spread new nodes out
       return () => clearTimeout(t);
     }
-    // `fit` only reads refs, so it isn't a dependency.
-  }, [fitKey, size.w, size.h]);
+    // `fit` only reads refs, so it isn't a dependency. Re-fit when services come or go (a codebase was connected).
+  }, [fitKey, size.w, size.h, nodes.length]);
 
   // Top 5 chokepoints by betweenness get a dashed ring.
   const chokepoints = useMemo(() => new Set(nodes.filter(n => n.type === 'Service')
@@ -216,6 +216,8 @@ export const GraphCanvas: React.FC<Props> = ({ nodes, links, highlight, showCont
           if (!fitted.current) {
             fitted.current = true;
             fit(600);
+          } else if (!userMoved.current) {
+            fit(400); // the layout settled after the graph changed (a codebase was connected): frame it again
           }
         }}
         nodeVisibility={n => visible(n)}

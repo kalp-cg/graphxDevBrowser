@@ -1,7 +1,6 @@
 import os
 
 os.environ.setdefault("AUTOPILOT_DELAY_S", "0")  # before sentinel.config is imported
-os.environ["ADMIN_TOKEN"] = "test-admin-token"
 # GRAPH_BACKEND=local runs the whole suite hermetically on the embedded engine (CI default); tigergraph runs it
 # against the real instance in TG_HOST (graph Sentinel_test).
 if os.getenv("GRAPH_BACKEND", "local") == "local":

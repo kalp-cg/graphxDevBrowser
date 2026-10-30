@@ -25,16 +25,14 @@ export const SettingsView: React.FC = () => {
   const sentinelStatus = useAppStore(s => s.sentinelStatus);
   const sentinelMessage = useAppStore(s => s.sentinelMessage);
   const connectSentinel = useAppStore(s => s.connectSentinel);
+  const connectCodebase = useAppStore(s => s.connectCodebase);
 
   const [activeTab, setActiveTab] = useState<'privacy' | 'ai' | 'integrations' | 'storage'>('privacy');
   const [isTestingOllama, setIsTestingOllama] = useState(false);
   const [sentinelUrlInput, setSentinelUrlInput] = useState(sentinelUrl);
-  // The token is only handed to the main process (encrypted there); it is not kept in app state.
-  const [sentinelTokenInput, setSentinelTokenInput] = useState('');
 
   const handleConnectSentinel = async () => {
-    await connectSentinel(sentinelUrlInput, sentinelTokenInput);
-    setSentinelTokenInput('');
+    await connectSentinel(sentinelUrlInput);
   };
 
   const handleTestOllama = async () => {
@@ -345,8 +343,7 @@ export const SettingsView: React.FC = () => {
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.4 }}>
                   Loads the live service graph from a SentinelGraph API (backed by TigerGraph) and sends it the API calls
                   pages make in the browser, so the graph shows what your app really calls. Blast radius runs as a GSQL
-                  traversal. TigerGraph credentials stay on the SentinelGraph server; the admin token is kept encrypted
-                  in the main process.
+                  traversal. TigerGraph credentials stay on the SentinelGraph server.
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '8px' }}>
@@ -359,27 +356,6 @@ export const SettingsView: React.FC = () => {
                       value={sentinelUrlInput}
                       onChange={e => setSentinelUrlInput(e.target.value)}
                       placeholder="http://localhost:8100"
-                      style={{
-                        width: '100%',
-                        background: 'var(--bg-primary)',
-                        border: '1px solid var(--border-medium)',
-                        borderRadius: '6px',
-                        padding: '7px 10px',
-                        color: 'var(--text-primary)',
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: '12px'
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
-                      Admin Token
-                    </label>
-                    <input
-                      type="password"
-                      value={sentinelTokenInput}
-                      onChange={e => setSentinelTokenInput(e.target.value)}
-                      placeholder="X-Admin-Token"
                       style={{
                         width: '100%',
                         background: 'var(--bg-primary)',
@@ -411,6 +387,24 @@ export const SettingsView: React.FC = () => {
                   >
                     {sentinelStatus === 'connecting' ? 'Connecting...' : 'Connect & Load Graph'}
                   </button>
+                  <button
+                    onClick={connectCodebase}
+                    disabled={sentinelStatus !== 'connected'}
+                    title="Pick your repository: services, dependencies, owners and recent commits are added to the graph"
+                    style={{
+                      background: 'transparent',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border-medium)',
+                      borderRadius: '5px',
+                      padding: '6px 14px',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: sentinelStatus === 'connected' ? 'pointer' : 'not-allowed',
+                      opacity: sentinelStatus === 'connected' ? 1 : 0.5
+                    }}
+                  >
+                    Connect codebase…
+                  </button>
                   <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{sentinelMessage}</span>
                 </div>
               </div>
@@ -434,7 +428,7 @@ export const SettingsView: React.FC = () => {
                 color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                 <li>Each profile (Default, Admin, Customer) has its own cookies, local storage, IndexedDB and cache.</li>
                 <li>Open tabs and browsing history, to restore your session and fill the new tab page.</li>
-                <li>The SentinelGraph address and admin token. The token is encrypted with the OS keychain.</li>
+                <li>The SentinelGraph address.</li>
                 <li>Captured network traffic and security findings live in memory only, until you quit.</li>
               </ul>
 

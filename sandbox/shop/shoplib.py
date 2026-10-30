@@ -51,8 +51,8 @@ STATE = State()
 class Exporter:
     """Buffers finished spans and posts them to SentinelGraph as one OTLP/JSON payload every `interval` s."""
 
-    def __init__(self, url: str, token: str, interval: float = 2.0) -> None:
-        self.url, self.token, self.interval = url.rstrip("/"), token, interval
+    def __init__(self, url: str, interval: float = 2.0) -> None:
+        self.url, self.interval = url.rstrip("/"), interval
         self.lock = threading.Lock()
         self.spans: dict[str, list[dict]] = {}
         self.sent = self.failed = 0
@@ -76,7 +76,7 @@ class Exporter:
                                                 "service.version": STATE.version.get(svc, "v1.0.0")})},
              "scopeSpans": [{"spans": s}]} for svc, s in spans.items()]}
         req = urllib.request.Request(f"{self.url}/v1/traces", json.dumps(payload).encode(),
-                                     {"Content-Type": "application/json", "X-Admin-Token": self.token})
+                                     {"Content-Type": "application/json"})
         try:
             urllib.request.urlopen(req, timeout=10).read()
             self.sent += 1
@@ -238,6 +238,6 @@ class Service:
     def serve(self) -> None:
         """Run this one service (the compose / one-process-per-service way)."""
         global EXPORTER
-        EXPORTER = Exporter(os.getenv("SENTINEL_URL", "http://localhost:8200"), os.getenv("ADMIN_TOKEN", ""))
+        EXPORTER = Exporter(os.getenv("SENTINEL_URL", "http://localhost:8200"))
         threading.Thread(target=EXPORTER.run_forever, daemon=True).start()
         self.server(int(os.getenv("PORT", PORTS[self.name])), "0.0.0.0").serve_forever()

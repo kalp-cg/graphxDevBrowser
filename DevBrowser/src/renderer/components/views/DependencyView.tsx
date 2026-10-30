@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Crosshair, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Crosshair, FolderGit2, RefreshCw, RotateCcw, ShieldAlert } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { InvestigationPanel } from '../common/SentinelPanels';
 import { GraphCanvas, type GraphHighlight } from '../graph/GraphCanvas';
-import type { SentinelNode } from '../../../shared/domain/sentinel';
+import type { ChaosKind, SentinelNode } from '../../../shared/domain/sentinel';
 
 const REFRESH_MS = 5000;
 const EMPTY = new Set<string>();
@@ -21,6 +21,9 @@ export const DependencyView: React.FC = () => {
   const computeBlast = useAppStore(s => s.calculateBlastRadiusForNode);
   const investigate = useAppStore(s => s.startSentinelInvestigation);
   const setActiveView = useAppStore(s => s.setActiveView);
+  const connectCodebase = useAppStore(s => s.connectCodebase);
+  const breakService = useAppStore(s => s.breakService);
+  const restoreHealthy = useAppStore(s => s.restoreHealthy);
   const theme = useAppStore(s => s.theme);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showContext, setShowContext] = useState(false);
@@ -66,13 +69,18 @@ export const DependencyView: React.FC = () => {
   if (snapshot && !services.length) {
     return (
       <Empty title="No services in the graph yet"
-        body="Scan your repository (python -m sentinel.ingest codebase .), point an OpenTelemetry Collector at /v1/traces, or browse your app here: its API calls are added as dependencies." />
+        body="Connect your codebase and its services, databases, owners and dependencies appear here. Services that talk to each other (auth, user flow, admin, ...) are linked from your docker-compose file, OpenTelemetry traces, and the API calls you make while browsing your app here.">
+        <button className="btn primary" onClick={() => void connectCodebase()}>
+          <FolderGit2 size={13} />
+          Connect codebase…
+        </button>
+      </Empty>
     );
   }
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px 6px 12px', minHeight: 40,
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, padding: '6px 8px 6px 12px', minHeight: 40,
         borderBottom: '1px solid var(--border-subtle)', fontSize: 12 }}>
         <span style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{services.length} services</span>
         {unhealthy.length > 0 ? (
@@ -81,7 +89,21 @@ export const DependencyView: React.FC = () => {
           <span className="tag">all healthy</span>
         )}
         {alerts > 0 && <span className="tag warn">{alerts} alerts</span>}
+        <input className="field" list="sentinel-services" aria-label="Find a service" placeholder="Find a service…"
+          style={{ width: 150, flex: '0 1 150px', minWidth: 90 }}
+          onChange={e => {
+            const hit = services.find(s => (s.name ?? s.label) === e.target.value.trim());
+            if (hit) setSelectedId(hit.id);
+          }} />
+        <datalist id="sentinel-services">
+          {services.map(s => <option key={s.id} value={s.name ?? s.label} />)}
+        </datalist>
         <div style={{ flex: 1 }} />
+        <button className="btn" title="Pick your repository: add its services and dependencies to the graph"
+          onClick={() => void connectCodebase()}>
+          <FolderGit2 size={13} />
+          Connect codebase
+        </button>
         <label title="Also show deploys, commits, people and incidents"
           style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
           <input type="checkbox" checked={showContext} onChange={e => setShowContext(e.target.checked)} />
@@ -93,6 +115,13 @@ export const DependencyView: React.FC = () => {
         <button className="icon-btn" title="Refresh" aria-label="Refresh graph" onClick={() => void refresh()}>
           <RefreshCw size={14} />
         </button>
+        {(unhealthy.length > 0 || alerts > 0) && (
+          <button className="btn" title="Back to a healthy system (what the agent learned is kept)" disabled={run.phase === 'running'}
+            onClick={() => void restoreHealthy()}>
+            <RotateCcw size={13} />
+            Restore healthy
+          </button>
+        )}
         <button className={`btn${alerts ? ' danger' : ''}`} disabled={run.phase === 'running'}
           onClick={() => void investigate()}>
           <ShieldAlert size={13} />
@@ -109,7 +138,7 @@ export const DependencyView: React.FC = () => {
           <Legend />
         </div>
         {(selected || run.phase !== 'idle') && (
-          <aside style={{ width: 280, flexShrink: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12,
+          <aside style={{ width: 280, maxWidth: '45%', minWidth: 200, flexShrink: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12,
             padding: 12, borderLeft: '1px solid var(--border-subtle)' }}>
             <InvestigationPanel />
             {selected && (
@@ -117,6 +146,7 @@ export const DependencyView: React.FC = () => {
                 onBlast={() => computeBlast(selected.id)}
                 onInvestigate={() => void investigate(
                   `${selected.name ?? selected.label} is failing. Find the root cause and propose a fix.`)}
+                onBreak={kind => void breakService(selected.name ?? selected.label, kind)}
                 running={run.phase === 'running'} />
             )}
           </aside>
@@ -127,7 +157,7 @@ export const DependencyView: React.FC = () => {
 };
 
 const Inspector: React.FC<{ node: SentinelNode; blastCount: number | null; onBlast: () => void; onInvestigate: () => void;
-  running: boolean }> = ({ node, blastCount, onBlast, onInvestigate, running }) => {
+  onBreak: (kind: ChaosKind) => void; running: boolean }> = ({ node, blastCount, onBlast, onInvestigate, onBreak, running }) => {
   const rows: [string, React.ReactNode][] = [
     ['Type', node.type],
     ['Status', node.status ? <span className={`tag${node.status === 'down' ? ' danger' : node.status === 'degraded' ? ' warn' : ''}`}>{node.status}</span> : null],
@@ -165,6 +195,12 @@ const Inspector: React.FC<{ node: SentinelNode; blastCount: number | null; onBla
             </div>
           )}
           <button className="btn" disabled={running} onClick={onInvestigate}>Investigate this service</button>
+          <div className="section-label" style={{ marginTop: 6 }} title="Simulated in the graph: nothing real is touched">Simulate a failure</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button className="btn danger" disabled={running} onClick={() => onBreak('deploy')}>Ship a bad deploy</button>
+            <button className="btn danger" disabled={running} onClick={() => onBreak('crash')}>Crash it</button>
+            <button className="btn danger" disabled={running} onClick={() => onBreak('degrade')}>Degrade it</button>
+          </div>
         </div>
       )}
     </div>

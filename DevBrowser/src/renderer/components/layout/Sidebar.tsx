@@ -1,27 +1,33 @@
 import React from 'react';
 import { Bot, Network, Send, Settings, Share2, ShieldAlert } from 'lucide-react';
 import { useAppStore, type NavigationView } from '../../store/useAppStore';
+import { forSite } from '../../../shared/domain/browser';
 
 /** The tool rail: each button opens its panel beside the page; clicking the open one closes it. */
 export const Sidebar: React.FC = () => {
   const activeView = useAppStore(s => s.activeView);
   const setActiveView = useAppStore(s => s.setActiveView);
-  const findings = useAppStore(s => s.findings.length);
-  const requests = useAppStore(s => s.transactions.length);
-  const failed = useAppStore(s => s.transactions.filter(t => !t.statusCode || t.statusCode >= 500).length);
+  // Badges describe the website that is open, like the panels do.
+  const currentUrl = useAppStore(s => s.currentUrl);
+  const siteFindings = useAppStore(s => s.findings);
+  const siteRequests = useAppStore(s => s.transactions);
+  const findings = forSite(siteFindings, currentUrl).length;
+  const here = forSite(siteRequests, currentUrl);
+  const requests = here.length;
+  const failed = here.filter(t => !t.statusCode || t.statusCode >= 500).length;
   const sentinel = useAppStore(s => s.sentinelStatus);
   const running = useAppStore(s => s.sentinelRun.phase === 'running');
 
   const items: { id: NavigationView; label: string; icon: React.ReactNode; badge?: string; tone?: 'danger' | 'accent' }[] = [
     { id: 'network', label: 'Network', icon: <Network size={18} />,
       badge: failed ? String(failed) : requests ? String(Math.min(requests, 999)) : undefined, tone: failed ? 'danger' : undefined },
-    { id: 'dependencies', label: 'Dependencies (SentinelGraph)', icon: <Share2 size={18} />,
-      badge: running ? '' : undefined, tone: 'accent' },
     { id: 'apiClient', label: 'API Client', icon: <Send size={18} /> },
     { id: 'security', label: 'Security', icon: <ShieldAlert size={18} />,
       badge: findings ? String(findings) : undefined, tone: 'danger' },
     { id: 'ai', label: 'AI Assistant', icon: <Bot size={18} /> }
   ];
+  const sentinelItem: (typeof items)[number] = { id: 'dependencies', label: 'Dependencies (SentinelGraph)',
+    icon: <Share2 size={18} />, badge: running ? '' : undefined, tone: 'accent' };
 
   const button = (item: (typeof items)[number] | { id: NavigationView; label: string; icon: React.ReactNode; badge?: string; tone?: string }) => {
     const active = activeView === item.id;
@@ -55,6 +61,8 @@ export const Sidebar: React.FC = () => {
     <nav aria-label="Tools" style={{ width: 48, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center',
       gap: 4, padding: '8px 0', background: 'var(--bg-primary)', borderRight: '1px solid var(--border-subtle)' }}>
       {items.map(button)}
+      <div role="separator" aria-label="SentinelGraph" style={{ width: 24, height: 1, margin: '6px 0', background: 'var(--border-medium)' }} />
+      {button(sentinelItem)}
       <div style={{ flex: 1 }} />
       {button({ id: 'settings', label: sentinel === 'connected' ? 'Settings' : 'Settings (SentinelGraph not connected)',
         icon: <Settings size={18} /> })}

@@ -118,6 +118,9 @@ export const InvestigationPanel: React.FC = () => {
         </div>
       )}
       {run.phase === 'failed' && <div style={{ color: 'var(--accent-rose)' }}>{run.report}</div>}
+      {run.phase === 'done' && !run.rootCause && run.report && (
+        <div style={{ color: 'var(--text-primary)', lineHeight: 1.5 }}>{run.report.replace(/\*\*/g, '')}</div>
+      )}
       {run.proposed.map(a => (
         <div key={a.uid} role="group" aria-label={`${a.kind} on ${a.target}`}
           style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px 0',

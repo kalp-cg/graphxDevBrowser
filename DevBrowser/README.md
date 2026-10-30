@@ -99,7 +99,7 @@ The **Dependencies** view can show a live service graph from a SentinelGraph API
 TigerGraph. Without a connection it shows the built-in sample graph.
 
 1. Run SentinelGraph (`uvicorn sentinel.api.main:app --port 8100` in its `backend/`, with `TG_HOST` / `TG_SECRET`).
-2. In **Settings → Integrations → SentinelGraph**, enter the API URL (`http://localhost:8100`) and its `ADMIN_TOKEN`,
+2. In **Settings → Integrations → SentinelGraph**, enter the API URL (`http://localhost:8100`),
    then **Connect & Load Graph**.
 
 What happens then:
@@ -118,12 +118,11 @@ What happens then:
 * **Reconnects on launch:** the URL and the keychain-encrypted token are saved in the app's user data.
 * **Blast radius** runs as a GSQL traversal in TigerGraph (`GET /api/services/{name}/blast-radius`, up to 6 hops),
   not just the direct neighbours.
-* **Credentials:** TigerGraph credentials stay on the SentinelGraph server. The admin token is handed to the main
-  process once and kept encrypted there (`safeStorage`); the renderer never stores it.
+* **Credentials:** TigerGraph credentials stay on the SentinelGraph server.
 
 Code: `src/main/integrations/sentinel-client.ts` (API client, traffic batching),
 `src/shared/domain/sentinel.ts` (mapping and layout), tests in `tests/unit/sentinel-*.test.ts`. The live tests run
-against a real API with `SENTINEL_URL=http://localhost:8100 SENTINEL_ADMIN_TOKEN=... npm test`, and the full
+against a real API with `SENTINEL_URL=http://localhost:8100 npm test`, and the full
 incident loop against the sandbox (`../sandbox/README.md`) with `SENTINEL_SANDBOX=1`.
 
 ---

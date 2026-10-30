@@ -42,6 +42,8 @@ export const NetworkTransactionSchema = z.object({
   encodedBodyLength: z.number().optional(),
   timing: NetworkTimingSchema.optional(),
   websocketFrames: z.array(WebSocketFrameSchema).optional(),
+  /** The page (top-level URL) that was open when the request was made. */
+  pageUrl: z.string().optional(),
   startTime: z.number(),
   endTime: z.number().optional(),
   error: z.string().optional()

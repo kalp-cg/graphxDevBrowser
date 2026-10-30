@@ -1,6 +1,6 @@
 """Run the whole sandbox shop in one process: seven services, a control endpoint and steady traffic.
 
-    python sandbox/shop/run_shop.py --sentinel http://localhost:8200 --token sandbox-token
+    python sandbox/shop/run_shop.py --sentinel http://localhost:8200
 
 Control (what SentinelGraph's `sandbox` action adapter and the sandbox CLI call), on port 7499:
 
@@ -50,9 +50,9 @@ def load_services() -> list[shoplib.Service]:
 
 
 class Shop:
-    def __init__(self, sentinel: str, token: str, rps: float, interval: float = 2.0) -> None:
-        self.sentinel, self.token, self.rps = sentinel.rstrip("/"), token, rps
-        self.exporter = shoplib.EXPORTER = Exporter(sentinel, token, interval)
+    def __init__(self, sentinel: str, rps: float, interval: float = 2.0) -> None:
+        self.sentinel, self.rps = sentinel.rstrip("/"), rps
+        self.exporter = shoplib.EXPORTER = Exporter(sentinel, interval)
         self.servers: list[ThreadingHTTPServer] = []
         self.requests = self.errors = 0
 
@@ -126,7 +126,7 @@ class Shop:
                 "message": deploy.get("message", "sandbox deploy"), "sha": secrets.token_hex(5),
                 "files": deploy.get("files", [f"services/{service}/app.py"])}
         req = urllib.request.Request(f"{self.sentinel}/api/changes", json.dumps(body).encode(),
-                                     {"Content-Type": "application/json", "X-Admin-Token": self.token})
+                                     {"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=10).read()
 
     def state(self) -> dict[str, Any]:
@@ -167,10 +167,9 @@ class Shop:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--sentinel", default="http://localhost:8200")
-    parser.add_argument("--token", default="sandbox-token")
     parser.add_argument("--rps", type=float, default=6.0, help="background customer requests per second")
     args = parser.parse_args()
-    Shop(args.sentinel, args.token, args.rps).start()
+    Shop(args.sentinel, args.rps).start()
     print(f"shop: storefront http://localhost:{PORTS['web']}  gateway http://localhost:{PORTS['gateway']}  "
           f"control http://localhost:{CONTROL_PORT}/__control", flush=True)
     try:

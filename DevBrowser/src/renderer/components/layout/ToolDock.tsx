@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Maximize2, Minimize2, X } from 'lucide-react';
 import { useAppStore, type NavigationView } from '../../store/useAppStore';
+import { FULL_PAGE_VIEWS, useNarrow } from '../../useNarrow';
 
 const TITLES: Partial<Record<NavigationView, string>> = {
   network: 'Network',
   apiClient: 'API Client',
   security: 'Security',
-  dependencies: 'Dependencies',
+  dependencies: 'SentinelGraph',
   ai: 'AI Assistant',
   settings: 'Settings'
 };
@@ -18,7 +19,9 @@ const MIN = 360;
 export const ToolDock: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const view = useAppStore(s => s.activeView);
   const setActiveView = useAppStore(s => s.setActiveView);
-  const maximized = useAppStore(s => s.panelMaximized);
+  const narrow = useNarrow();
+  const fullPage = FULL_PAGE_VIEWS.has(view);
+  const maximized = useAppStore(s => s.panelMaximized) || narrow || fullPage;
   const setMaximized = useAppStore(s => s.setPanelMaximized);
   const [width, setWidth] = useState(() => {
     const saved = Number(localStorage.getItem(WIDTH_KEY));
@@ -52,7 +55,7 @@ export const ToolDock: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
   return (
     <section aria-label={`${TITLES[view] ?? ''} panel`} style={{ position: 'relative', display: 'flex', flexDirection: 'column',
-      width: maximized ? undefined : width, flex: maximized ? 1 : 'none', minWidth: 0,
+      width: maximized ? undefined : width, flex: maximized ? 1 : 'none', minWidth: 0, maxWidth: '100%',
       background: 'var(--bg-secondary)', borderLeft: '1px solid var(--border-subtle)' }}>
       {!maximized && (
         <div
@@ -68,11 +71,11 @@ export const ToolDock: React.FC<{ children: React.ReactNode }> = ({ children }) 
       <header style={{ display: 'flex', alignItems: 'center', gap: 4, height: 34, padding: '0 6px 0 12px', flexShrink: 0,
         borderBottom: '1px solid var(--border-subtle)' }}>
         <span style={{ flex: 1, fontSize: 12, fontWeight: 600 }}>{TITLES[view]}</span>
-        <button className="icon-btn" title={maximized ? 'Restore beside page' : 'Maximize'}
+        {!narrow && !fullPage && <button className="icon-btn" title={maximized ? 'Restore beside page' : 'Maximize'}
           aria-label={maximized ? 'Restore panel' : 'Maximize panel'} onClick={() => setMaximized(!maximized)}>
           {maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-        </button>
-        <button className="icon-btn" title="Close panel (Cmd+\)" aria-label="Close panel" onClick={() => setActiveView('browser')}>
+        </button>}
+        <button className="icon-btn" title={fullPage ? 'Back to the page (Cmd+\\)' : 'Close panel (Cmd+\\)'} aria-label="Close panel" onClick={() => setActiveView('browser')}>
           <X size={15} />
         </button>
       </header>

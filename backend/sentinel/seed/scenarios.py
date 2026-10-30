@@ -4,7 +4,12 @@
 resolved (and the alerts, actions and deployments they point to) survive, so re-running a similar incident
 can be faster. `seed_baseline` (python -m sentinel.seed --reset) is the hard reset that wipes everything.
 """
+import json
+import os
 import random
+import time
+import urllib.error
+import urllib.request
 import uuid
 
 from ..db import Batch, Graph, attrs, get_graph, link, run, upsert
@@ -222,3 +227,58 @@ def reset(graph: Graph | None = None, keep_memory: bool = True) -> None:
         soft_reset(graph)
     else:
         seed_baseline(graph)
+
+
+# --- The sandbox shop: a real system, so a failure has to be real or the next trace window heals it ---
+
+def sandbox_enabled() -> bool:
+    return os.getenv("ACTION_ADAPTER", "").lower() == "sandbox"
+
+
+def _shop(cmd: dict, timeout: float = 10) -> dict:
+    url = os.getenv("SANDBOX_URL", "http://localhost:7499").rstrip("/")
+    req = urllib.request.Request(f"{url}/__control", json.dumps(cmd).encode(), {"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read())
+
+
+def sandbox_reset(graph: Graph | None = None) -> None:
+    """Heal the running shop (its faults, breakers and versions) and quiet the graph."""
+    _shop({"action": "reset"})
+    soft_reset(graph or get_graph())
+
+
+def sandbox_chaos(service: str, mode: str = "down", with_deploy: bool = False, graph: Graph | None = None,
+                  wait_s: float = 25) -> dict | None:
+    """Break a service of the running sandbox shop, then wait until its traces have turned into alerts, so an
+    investigation started right after sees the incident. None when the shop does not know the service (the
+    caller falls back to a graph-only failure). Injecting only into the graph would be undone within seconds
+    by the shop's healthy traces."""
+    from ..tools.read import firing_alerts  # tools import this module's siblings
+
+    graph = graph or get_graph()
+    if not attrs(graph, "Service", f"svc:{service}"):
+        raise ValueError(f"unknown service {service!r}")
+    mode = mode if mode in ("down", "degraded") else "down"
+    cmd: dict = {"action": "fault", "service": service, "rate": 1.0 if mode == "down" else 0.5}
+    deploy = None
+    if with_deploy:
+        rng = random.Random(f"{service}:{now_ms() // 60000}")
+        deploy = {"version": f"v9.{rng.randint(0, 9)}.{rng.randint(1, 9)}", "message": rng.choice(CHAOS_CHANGES),
+                  "author": "Priya Shah"}
+        cmd["deploy"] = deploy
+    try:
+        _shop({"action": "reset"})
+        soft_reset(graph)
+        _shop(cmd)
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    deadline = time.monotonic() + wait_s
+    alerting: list[str] = []
+    while time.monotonic() < deadline:
+        alerting = sorted({a["service"] for a in firing_alerts(graph)})
+        if alerting:
+            break
+        time.sleep(1)
+    return {"scenario": "chaos", "title": f"Chaos: {service} {mode}", "target": service, "deploy": deploy,
+            "alerting_services": alerting, "alert_uids": []}

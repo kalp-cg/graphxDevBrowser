@@ -15,7 +15,7 @@ def test_api_flow(graph, monkeypatch):
     from sentinel.seed.scenarios import inject_scenario
 
     inject_scenario("db-pool-exhaustion", graph, fresh=True)
-    with TestClient(app, headers={"X-Admin-Token": "test-admin-token"}) as c:
+    with TestClient(app) as c:
         assert c.get("/api/health").json()["tigergraph"]["ok"]
         assert {s["name"] for s in c.get("/api/scenarios").json()} >= {"db-pool-exhaustion", "cache-stampede"}
         assert c.post("/api/scenarios/nope").status_code == 404
@@ -52,33 +52,6 @@ def test_api_flow(graph, monkeypatch):
         assert svc["status"] == "degraded" and svc["revenue_per_min"] == 350
 
 
-PROTECTED = [
-    ("post", "/api/scenarios/db-pool-exhaustion"),
-    ("post", "/api/chaos/pricing-service"),
-    ("post", "/api/reset"),
-    ("post", "/api/runs"),
-    ("post", "/api/actions/act:x/approve"),
-    ("post", "/api/actions/act:x/reject"),
-    ("post", "/api/alerts/alertmanager"),
-]
-
-
-def test_write_routes_need_the_admin_token():
-    from sentinel.api.main import app
-
-    c = TestClient(app)  # no lifespan: the check happens before any database work
-    for method, path in PROTECTED:
-        assert getattr(c, method)(path).status_code == 401, path
-        assert getattr(c, method)(path, headers={"X-Admin-Token": "wrong"}).status_code == 401, path
-
-
-def test_write_routes_refuse_when_no_token_is_configured(monkeypatch):
-    from sentinel.api.main import app
-
-    monkeypatch.setenv("ADMIN_TOKEN", "")
-    assert TestClient(app).post("/api/reset", headers={"X-Admin-Token": ""}).status_code == 401
-
-
 def test_cors_allows_only_the_configured_origins():
     from sentinel.api.main import app
     from sentinel.config import settings
@@ -106,7 +79,7 @@ def test_alertmanager_webhook_flow(graph, monkeypatch):
             }
         ]
     }
-    with TestClient(app, headers={"X-Admin-Token": "test-admin-token"}) as c:
+    with TestClient(app) as c:
         res = c.post("/api/alerts/alertmanager", json=payload)
         assert res.status_code == 200
         out = res.json()

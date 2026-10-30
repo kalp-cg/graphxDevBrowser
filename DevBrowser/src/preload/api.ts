@@ -6,6 +6,9 @@ import type { AIDebugContext, AICodeDiff } from '../shared/domain/ai';
 import type { NetworkTransaction } from '../shared/domain/network';
 import type {
   InvestigationEvidence,
+  ChaosKind,
+  ChaosResult,
+  CodebaseScanResult,
   SentinelAction,
   SentinelBlastRadius,
   SentinelResolution,
@@ -38,7 +41,7 @@ export interface DevBrowserAPI {
     clearFindings: () => Promise<void>;
   };
   sentinel: {
-    configure: (baseUrl: string, adminToken: string) => Promise<SentinelStatus>;
+    configure: (baseUrl: string) => Promise<SentinelStatus>;
     status: () => Promise<SentinelStatus>;
     getGraph: () => Promise<SentinelSnapshot>;
     blastRadius: (service: string) => Promise<SentinelBlastRadius>;
@@ -48,6 +51,11 @@ export interface DevBrowserAPI {
     currentRun: () => Promise<SentinelRun>;
     approveAction: (uid: string) => Promise<{ outcome: string; action: SentinelAction }>;
     rejectAction: (uid: string) => Promise<SentinelAction>;
+    /** Opens a folder dialog and scans the chosen repository; null if cancelled. */
+    scanCodebase: () => Promise<CodebaseScanResult | null>;
+    /** Simulate a failure of a service in the graph. */
+    breakService: (service: string, kind: ChaosKind) => Promise<ChaosResult>;
+    restoreHealthy: () => Promise<unknown>;
   };
   privacy: {
     triggerNuclearShred: () => Promise<ShredResult>;

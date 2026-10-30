@@ -63,7 +63,6 @@ Traditional APM dashboards (Datadog, Grafana, PagerDuty) view metrics per servic
 | :--- | :--- |
 | **What do all alerting services depend on?** | Multi-source BFS down `DEPENDS_ON` (≤ 5 hops) from every alerting service, tracking hop counts in a `MapAccum`. Candidates are nodes reached by all sources. |
 | **Which shared dependency caused the failure?** | Reverse BFS up `reverse_DEPENDS_ON` from all unhealthy services: ranks unhealthy candidates that have **nothing unhealthy beneath them** (the deepest failure). |
-| **What changed there, and who authored it?** | Multi-hop pattern: `Service <-DEPLOYED_TO- Deployment -CONTAINS-> Commit -AUTHORED_BY-> Person -MEMBER_OF-> Team`. |
 | **Who is on-call right now?** | Multi-hop traversal: `Service <-OWNS- Team <-ON_CALL {from_ms, to_ms}- Person`. |
 | **What is the blast radius and impact?** | Reverse BFS reachability + GSQL PageRank + Brandes Betweenness Centrality. |
 | **Have we seen this failure pattern before?** | Traversal of past `Incident` vertices within 2 hops downstream of affected services, weighted by proximity. |
@@ -94,7 +93,6 @@ flowchart LR
   subgraph BackendAPI["Control Plane (FastAPI + Python 3.12)"]
     REST[REST Endpoints]
     WS[WebSocket Hub]
-    AUTH[Admin Token / Bearer Auth]
     INGEST[Ingest Pipeline: OTel, Alerts, Traffic]
     ACTION_ENG[Action Execution Engine]
   end
@@ -138,7 +136,6 @@ graph LR
   Service -- READS_FROM / WRITES_TO --> Database
   Deployment -- DEPLOYED_TO --> Service
   Deployment -- CONTAINS --> Commit
-  Commit -- AUTHORED_BY --> Person
   Alert -- FIRED_ON --> Service
   Incident -- TRIGGERED_BY --> Alert
   Incident -- AFFECTED --> Service
@@ -170,7 +167,6 @@ The autonomous agent interacts with TigerGraph purely through the Model Context 
 1. **`get_active_alerts`**: Retrieves all currently firing alerts across the topology.
 2. **`find_common_cause`**: Multi-source BFS up to 5 hops finding services reachable from all alerting nodes.
 3. **`deepest_failure`**: Reverse BFS identifying unhealthy nodes that have no unhealthy downstream callers (the root cause).
-4. **`recent_changes`**: Traverses `Service <-DEPLOYED_TO- Deployment -CONTAINS-> Commit -AUTHORED_BY-> Person` within a time window.
 5. **`blast_radius`**: Reverse BFS determining the upstream cascade and calculating total revenue-at-risk.
 6. **`service_context`**: Comprehensive vertex inspection: owner team, on-call engineer, database dependencies, open circuit breakers.
 7. **`recall_similar`**: Weighted graph traversal over historical `Incident` vertices and their resolutions.
@@ -228,7 +224,7 @@ each package directory (`services/*`, `apps/*`, ...) becomes a service and trace
 | Select a request in the Network panel | `GET /api/resolve?url=`: the service behind it, owner team, on-call, health, blast radius, recent changes. |
 | **Investigate this failure** on a 5xx | `POST /api/runs` with the request as evidence: it becomes a health signal, and the agent starts from it but follows the graph to the real origin. |
 | Watch the run, **Approve** / **Reject** | `GET /api/runs/current` (scoped to the run), `POST /api/actions/{uid}/approve`. |
-| Restart the app | The connection is restored; the admin token is stored only keychain-encrypted (`safeStorage`). |
+| Restart the app | The connection is restored. |
 
 ## ⚙️ Graph Engines
 
@@ -259,7 +255,6 @@ Key variables in `.env`:
 TG_HOST=https://your-instance.i.tgcloud.io
 TG_GRAPH=Sentinel
 TG_SECRET=your-tigergraph-secret
-ADMIN_TOKEN=dev-admin-token
 ACTIONS_MODE=dry-run   # change to 'live' for real Kubernetes/GitHub execution
 ACTION_ADAPTER=auto    # 'kubernetes', 'github', or 'auto'
 LLM_PROVIDER=gemini    # 'gemini', 'openai', or 'autopilot'
@@ -294,7 +289,7 @@ cd DevBrowser
 npm install
 npm run dev
 ```
-In DevBrowser, navigate to **Settings → Integrations → SentinelGraph**, enter `http://localhost:8100` and your `ADMIN_TOKEN`, then click **Test & Save**.
+In DevBrowser, navigate to **Settings → Integrations → SentinelGraph**, enter `http://localhost:8100`, then click **Connect & Load Graph**.
 
 ---
 
@@ -308,8 +303,6 @@ receivers:
     webhook_configs:
       - url: 'http://<sentinel-host>:8100/api/alerts/alertmanager'
         send_resolved: true
-        http_config:
-          bearer_token: '<ADMIN_TOKEN>'
 ```
 
 ### 2. OpenTelemetry Traces
@@ -319,8 +312,6 @@ exporters:
   otlphttp/sentinel:
     traces_endpoint: http://<sentinel-host>:8100/v1/traces
     encoding: json
-    headers:
-      Authorization: "Bearer <ADMIN_TOKEN>"
 service:
   pipelines:
     traces:
@@ -332,7 +323,6 @@ service:
 Record deploys from GitHub Actions, GitLab CI, or Jenkins:
 ```bash
 curl -X POST http://localhost:8100/api/changes \
-  -H "Authorization: Bearer dev-admin-token" \
   -H "Content-Type: application/json" \
   -d '{
     "service": "inventory-db-proxy",
@@ -358,7 +348,7 @@ GRAPH_BACKEND=tigergraph .venv/bin/python -m pytest -q     # against TigerGraph 
 ```bash
 backend/.venv/bin/python sandbox/run.py up &
 for s in web gateway catalog cart checkout payments inventory; do backend/.venv/bin/python sandbox/run.py demo $s; done
-cd DevBrowser && SENTINEL_SANDBOX=1 SENTINEL_URL=http://localhost:8200 SENTINEL_ADMIN_TOKEN=sandbox-token npx vitest run
+cd DevBrowser && SENTINEL_SANDBOX=1 SENTINEL_URL=http://localhost:8200 npx vitest run
 ```
 
 ### DevBrowser Unit & Integration Tests (vitest)
@@ -374,7 +364,7 @@ npm test
 cd e2e
 npm install
 npx playwright install chromium
-ADMIN_TOKEN=dev-admin-token npx playwright test   # against a running API (:8100) + dashboard (:3001)
+npx playwright test   # against a running API (:8100) + dashboard (:3001)
 ```
 
 ---

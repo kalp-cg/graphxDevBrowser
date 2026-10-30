@@ -38,3 +38,7 @@ DevBrowser/*.lcov
 DevBrowser/.nyc_output/
 .sentinel-data/
 sandbox/.data/
+
+# Third-party repos cloned for demos
+demo-repos/
+.sentinel-logs/

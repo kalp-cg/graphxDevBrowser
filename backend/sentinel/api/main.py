@@ -3,14 +3,14 @@
 Run: uvicorn sentinel.api.main:app --port 8000
 """
 import asyncio
-import hmac
 import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -24,8 +24,9 @@ from ..ingest import codebase
 from ..ingest.alerts import ingest_alertmanager
 from ..ingest.browser import to_otlp as browser_to_otlp
 from ..ingest.otel import ingest_traces, record_change
-from ..seed.generator import refresh_on_call
-from ..seed.scenarios import SCENARIOS, inject_chaos, inject_scenario, reset, service_count
+from ..seed.generator import refresh_on_call, wipe
+from ..seed.scenarios import (SCENARIOS, inject_chaos, inject_scenario, reset, sandbox_chaos, sandbox_enabled,
+                              sandbox_reset, service_count)
 from ..tools import actions, read, rootcause
 from ..tools.common import now_ms
 from .graph_view import graph_snapshot, incidents_view
@@ -120,23 +121,6 @@ app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), al
                    allow_headers=["*"])
 
 
-def require_admin(x_admin_token: str | None = Header(default=None),
-                  authorization: str | None = Header(default=None)) -> None:
-    """Gate for every route that writes or spends LLM credits. Fails closed when ADMIN_TOKEN is unset."""
-    expected = os.getenv("ADMIN_TOKEN", "")  # read per request so it can be rotated without code changes
-    bearer = (
-        authorization.removeprefix("Bearer ").strip()
-        if (authorization and authorization.startswith("Bearer "))
-        else ""
-    )
-    token = x_admin_token or bearer
-    if not expected or not token or not hmac.compare_digest(token, expected):
-        raise HTTPException(401, "missing or invalid X-Admin-Token")
-
-
-admin = [Depends(require_admin)]
-
-
 DEFAULT_QUESTION = "Alerts are firing. Investigate, find the root cause and fix it."
 
 
@@ -201,7 +185,7 @@ async def scenarios() -> list[dict]:
     return [{"name": k, "title": v["title"], "alerts": [a[0] for a in v["alerts"]]} for k, v in SCENARIOS.items()]
 
 
-@app.post("/api/scenarios/{name}", dependencies=admin)
+@app.post("/api/scenarios/{name}")
 async def start_scenario(name: str) -> dict:
     if name not in SCENARIOS:
         raise HTTPException(404, f"unknown scenario {name}")
@@ -214,13 +198,15 @@ async def start_scenario(name: str) -> dict:
     return info
 
 
-@app.post("/api/chaos/{service}", dependencies=admin)
+@app.post("/api/chaos/{service}")
 async def chaos(service: str, mode: str = "down", deploy: bool = False) -> dict:
     """Break any service (optionally with a bad deploy). Unscripted: the agent must work it out."""
     if runs.busy:
         raise HTTPException(409, "wait for the current investigation to finish")
     try:
-        info = await asyncio.to_thread(inject_chaos, service, mode, deploy)
+        info = (await asyncio.to_thread(sandbox_chaos, service, mode, deploy)) if sandbox_enabled() else None
+        if info is None:
+            info = await asyncio.to_thread(inject_chaos, service, mode, deploy)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
     hub.history = []
@@ -229,27 +215,32 @@ async def chaos(service: str, mode: str = "down", deploy: bool = False) -> dict:
     return info
 
 
-@app.post("/api/reset", dependencies=admin)
+@app.post("/api/reset")
 async def reset_graph(keep_memory: bool = True) -> dict:
     if runs.busy:
         raise HTTPException(409, "wait for the current investigation to finish")
+    if sandbox_enabled():
+        try:
+            await asyncio.to_thread(sandbox_reset)  # heal the running shop too, or its failures come straight back
+        except OSError:
+            pass
     await asyncio.to_thread(reset, None, keep_memory)
     hub.history = []
     await hub.broadcast({"type": "graph_update", "reason": "reset"})
     return {"ok": True, "keep_memory": keep_memory}
 
 
-@app.post("/v1/traces", dependencies=admin)
+@app.post("/v1/traces")
 async def otlp_traces(payload: dict[str, Any], component: str = "service") -> dict:
     """OTLP/HTTP traces (JSON encoding), e.g. from an OpenTelemetry Collector `otlphttp` exporter with
-    `encoding: json` and the X-Admin-Token header. component=module for a monolith (spans need code.namespace)."""
+    `encoding: json`. component=module for a monolith (spans need code.namespace)."""
     kind = "module" if component == "module" else "service"
     out = await asyncio.to_thread(ingest_traces, get_graph(), payload, kind)
     await hub.broadcast({"type": "graph_update", "reason": "traces"})
     return out
 
 
-@app.post("/api/browser-traffic", dependencies=admin)
+@app.post("/api/browser-traffic")
 async def browser_traffic(records: list[dict[str, Any]]) -> dict:
     """Requests captured by DevBrowser ({pageUrl, url, method, statusCode, mimeType, startTime, endTime}):
     page origin -> API host become dependencies. Topology only: health comes from traces, alerts and evidence."""
@@ -259,7 +250,7 @@ async def browser_traffic(records: list[dict[str, Any]]) -> dict:
     return out
 
 
-@app.post("/api/workspace", dependencies=admin)
+@app.post("/api/workspace")
 async def apply_workspace(manifest: dict[str, Any]) -> dict:
     """A codebase scan (`python -m sentinel.ingest codebase PATH --push URL`): services, dependencies,
     owners and recent changes into the graph; the addresses each service answers on into the workspace."""
@@ -272,6 +263,31 @@ async def apply_workspace(manifest: dict[str, Any]) -> dict:
                     "services": [s["name"] for s in manifest["services"]]})
     await hub.broadcast({"type": "graph_update", "reason": "workspace"})
     return out
+
+
+@app.post("/api/workspace/scan")
+async def scan_workspace(body: dict[str, Any]) -> dict:
+    """Scan a repository that lives on the API's own machine ({"path": "/abs/path/to/repo"}), the case when
+    DevBrowser and the API run side by side. A remote API cannot see your disk: use `--push` from the CLI."""
+    path = Path(str(body.get("path", ""))).expanduser()
+    if not path.is_dir():
+        raise HTTPException(422, f"{path} is not a directory on the machine running the SentinelGraph API; "
+                                 "scan from your machine with: python -m sentinel.ingest codebase PATH --push URL")
+    try:
+        manifest = await asyncio.to_thread(codebase.scan, path)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if not manifest["services"] and not manifest["databases"]:
+        raise HTTPException(422, f"no services found in {path} (looked for a docker-compose file or "
+                                 "directories with a package manifest under ., services/, apps/, packages/)")
+    # A different codebase is a different system: its map replaces the previous one (seeded demo company included),
+    # so the graph shows what was connected and nothing else. A re-scan of the same repo only updates it.
+    replaced = bool(body.get("replace", True)) and workspace.load().get("repo") != manifest["repo"]
+    if replaced:
+        await asyncio.to_thread(wipe, get_graph())
+    out = await apply_workspace(manifest)
+    return {**out, "repo": manifest["repo"], "source": manifest["source"], "replaced": replaced,
+            "service_names": [s["name"] for s in manifest["services"]]}
 
 
 @app.get("/api/workspace")
@@ -304,7 +320,7 @@ async def resolve_url(url: str) -> dict:
     return await asyncio.to_thread(lookup)
 
 
-@app.post("/api/alerts/alertmanager", dependencies=admin)
+@app.post("/api/alerts/alertmanager")
 async def alertmanager_webhook(payload: dict[str, Any]) -> dict:
     """Prometheus Alertmanager webhook: creates firing/resolved Alert vertices and links to Service."""
     out = await asyncio.to_thread(ingest_alertmanager, get_graph(), payload)
@@ -338,7 +354,7 @@ class Change(BaseModel):
     files: list[str] = []
 
 
-@app.post("/api/changes", dependencies=admin)
+@app.post("/api/changes")
 async def change(c: Change) -> dict:
     """A deploy marker from CI/CD (or a flag change): Deployment -> Commit -> Person, deployed to the service."""
     uid = await asyncio.to_thread(record_change, get_graph(), c.service, c.version, c.at or now_ms(), c.author,
@@ -347,7 +363,7 @@ async def change(c: Change) -> dict:
     return {"deployment": uid}
 
 
-@app.post("/api/runs", dependencies=admin)
+@app.post("/api/runs")
 async def start_run(req: RunRequest) -> dict:
     if runs.busy:
         raise HTTPException(409, "an investigation is already running")
@@ -374,7 +390,7 @@ async def list_actions(status: str | None = None) -> list[dict]:
     return await asyncio.to_thread(actions.list_actions, status)
 
 
-@app.post("/api/actions/{uid}/approve", dependencies=admin)
+@app.post("/api/actions/{uid}/approve")
 async def approve(uid: str) -> dict:
     out = await asyncio.to_thread(actions.execute_action, uid, "human")
     if "error" in out:
@@ -384,7 +400,7 @@ async def approve(uid: str) -> dict:
     return out
 
 
-@app.post("/api/actions/{uid}/reject", dependencies=admin)
+@app.post("/api/actions/{uid}/reject")
 async def reject(uid: str) -> dict:
     out = await asyncio.to_thread(actions.reject_action, uid, "human")
     if not out:

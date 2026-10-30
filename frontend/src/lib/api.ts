@@ -3,38 +3,16 @@ import type { Action, GraphData, Health, Incident, Scenario } from "./types";
 export const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8100").replace(/\/$/, "");
 export const WS_URL = API_BASE.replace(/^http/, "ws") + "/ws";
 
-const TOKEN_KEY = "sentinel-admin-token";
-
-function storedToken(): string {
-  try {
-    return localStorage.getItem(TOKEN_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function send(path: string, token: string, init?: RequestInit): Promise<Response> {
+function send(path: string, init?: RequestInit): Promise<Response> {
   return fetch(API_BASE + path, {
     ...init,
-    headers: { "Content-Type": "application/json", "X-Admin-Token": token, ...(init?.headers ?? {}) },
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     cache: "no-store",
   });
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  let res = await send(path, storedToken(), init);
-  if (res.status === 401 && typeof window !== "undefined") {
-    // Write routes need the server's ADMIN_TOKEN: ask once and remember it in this browser.
-    const entered = window.prompt("Admin token required for this action:");
-    if (entered) {
-      try {
-        localStorage.setItem(TOKEN_KEY, entered);
-      } catch {
-        /* storage blocked: the token is used for this request only */
-      }
-      res = await send(path, entered, init);
-    }
-  }
+  const res = await send(path, init);
   if (!res.ok) {
     let detail = res.statusText;
     try {

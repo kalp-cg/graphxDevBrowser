@@ -8,15 +8,14 @@ import type { NetworkTransaction } from '../../src/shared/domain/network';
 // It breaks the sandbox shop's inventory service, then does what a developer does in DevBrowser.
 const API = process.env.SENTINEL_SANDBOX_API ?? 'http://localhost:8200';
 const CONTROL = 'http://localhost:7499/__control';
-const plain = { encryptSecret: (s: string) => s, decryptSecret: (s: string) => s };
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const control = async (body: unknown) =>
   (await fetch(CONTROL, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } })).json();
 
 describe.skipIf(!process.env.SENTINEL_SANDBOX)('DevBrowser on the live sandbox', () => {
   it('a failing checkout -> context -> investigation -> approved rollback -> recovery', async () => {
-    const client = new SentinelGraphClient(plain);
-    client.configure(API, 'sandbox-token');
+    const client = new SentinelGraphClient();
+    client.configure(API);
     expect((await client.status()).ok).toBe(true);
 
     await control({ action: 'reset' });

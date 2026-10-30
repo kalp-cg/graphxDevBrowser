@@ -18,7 +18,6 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       PAGER_WEBHOOK_URL: ${PAGER_WEBHOOK_URL:-}
       CORS_ORIGINS: http://localhost:3001
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-dev-admin-token}   # local default; set your own for anything public
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

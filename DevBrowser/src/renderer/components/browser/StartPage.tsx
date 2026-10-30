@@ -2,10 +2,14 @@ import React, { useMemo } from 'react';
 import { displayUrl } from '../../../shared/domain/browser';
 import { navigate } from '../../browser/pages';
 import { useBrowserStore } from '../../store/useBrowserStore';
+import { useAppStore } from '../../store/useAppStore';
 
 /** A new tab: the sites visited most recently, one per host, local dev servers first. */
 export const StartPage: React.FC<{ tabId: string }> = ({ tabId }) => {
   const history = useBrowserStore(s => s.history);
+  const sentinel = useAppStore(s => s.sentinelStatus);
+  const setActiveView = useAppStore(s => s.setActiveView);
+  const connectCodebase = useAppStore(s => s.connectCodebase);
   const recent = useMemo(() => {
     const seen = new Set<string>();
     const out = [];
@@ -28,6 +32,25 @@ export const StartPage: React.FC<{ tabId: string }> = ({ tabId }) => {
           <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
             Type an address, a port number for a local dev server (<code>3000</code>), or a search.
           </p>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 14, borderRadius: 8,
+          border: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Map your services</div>
+          <p style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)', margin: 0 }}>
+            {sentinel === 'connected'
+              ? 'Connect your project and see how its services (auth, user flow, admin, ...) depend on each other, and what breaks if one fails.'
+              : 'Connect SentinelGraph once, then point it at your project to see how its services depend on each other.'}
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {sentinel === 'connected' ? (
+              <>
+                <button className="btn primary" onClick={() => void connectCodebase()}>Connect project…</button>
+                <button className="btn" onClick={() => setActiveView('dependencies')}>Open service map</button>
+              </>
+            ) : (
+              <button className="btn primary" onClick={() => setActiveView('settings')}>Connect SentinelGraph</button>
+            )}
+          </div>
         </div>
         {recent.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

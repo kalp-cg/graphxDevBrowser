@@ -39,6 +39,9 @@ export const IPC_CHANNELS = {
   SENTINEL_CURRENT_RUN: 'devbrowser:sentinel:currentRun',
   SENTINEL_APPROVE_ACTION: 'devbrowser:sentinel:approveAction',
   SENTINEL_REJECT_ACTION: 'devbrowser:sentinel:rejectAction',
+  SENTINEL_SCAN_CODEBASE: 'devbrowser:sentinel:scanCodebase',
+  SENTINEL_BREAK_SERVICE: 'devbrowser:sentinel:breakService',
+  SENTINEL_RESTORE_HEALTHY: 'devbrowser:sentinel:restoreHealthy',
 
   // Privacy & Shred
   PRIVACY_TRIGGER_NUCLEAR_SHRED: 'devbrowser:privacy:triggerNuclearShred'

@@ -9,6 +9,7 @@ import {
   toDevBrowserGraph,
   toEvidence,
   type RunSummary,
+  type ChaosKind,
   type SentinelResolution,
   type SentinelSnapshot
 } from '../../shared/domain/sentinel';
@@ -79,6 +80,12 @@ interface AppState {
   sendActiveRequest: () => Promise<void>;
   loadFromNetworkTransaction: (tx: NetworkTransaction) => void;
 
+  /** Panels show the open website only; History shows everything captured before. */
+  securityHistory: boolean;
+  networkHistory: boolean;
+  setSecurityHistory: (history: boolean) => void;
+  setNetworkHistory: (history: boolean) => void;
+
   // Security Auditor
   findings: SecurityFinding[];
   selectedFindingId: string | null;
@@ -111,7 +118,13 @@ interface AppState {
   sentinelMessage: string;
   /** The live graph as SentinelGraph serves it (services plus deploys, alerts, incidents, people). */
   sentinelSnapshot: SentinelSnapshot | null;
-  connectSentinel: (baseUrl: string, adminToken: string) => Promise<void>;
+  connectSentinel: (baseUrl: string) => Promise<void>;
+  /** Pick a repository and map its services into the graph. */
+  connectCodebase: () => Promise<void>;
+  /** Demo: break a service (bad deploy, crash or degrade) so there is something to investigate. */
+  breakService: (service: string, kind: ChaosKind) => Promise<void>;
+  /** Demo: back to a healthy system. */
+  restoreHealthy: () => Promise<void>;
   restoreSentinel: () => Promise<void>;
   refreshSentinelGraph: () => Promise<void>;
   startSentinelInvestigation: (question?: string, tx?: NetworkTransaction) => Promise<void>;
@@ -326,9 +339,14 @@ export const useAppStore = create<AppState>((set, get) => {
       });
     },
 
+    securityHistory: false,
+    networkHistory: false,
+    setSecurityHistory: (securityHistory) => set({ securityHistory }),
+    setNetworkHistory: (networkHistory) => set({ networkHistory }),
+
     // Security Auditor
     findings: [],
-    selectedFindingId: 'sec-001',
+    selectedFindingId: null,
     securitySeverityFilter: 'all',
     setSelectedFindingId: (selectedFindingId) => set({ selectedFindingId }),
     setSecuritySeverityFilter: (securitySeverityFilter) => set({ securitySeverityFilter }),
@@ -404,10 +422,10 @@ export const useAppStore = create<AppState>((set, get) => {
     sentinelStatus: 'disconnected',
     sentinelMessage: 'Not connected',
     sentinelSnapshot: null,
-    connectSentinel: async (baseUrl, adminToken) => {
+    connectSentinel: async (baseUrl) => {
       if (!window.devBrowserAPI) return;
       set({ sentinelUrl: baseUrl, sentinelStatus: 'connecting' });
-      const status = await window.devBrowserAPI.sentinel.configure(baseUrl, adminToken);
+      const status = await window.devBrowserAPI.sentinel.configure(baseUrl);
       set({ sentinelStatus: status.ok ? 'connected' : 'disconnected', sentinelMessage: status.message });
       get().addToast({
         type: status.ok ? 'success' : 'warning',
@@ -415,6 +433,46 @@ export const useAppStore = create<AppState>((set, get) => {
         message: status.message
       });
       if (status.ok) await get().refreshSentinelGraph();
+    },
+    connectCodebase: async () => {
+      if (!window.devBrowserAPI || get().sentinelStatus !== 'connected') {
+        get().addToast({ type: 'warning', title: 'Connect SentinelGraph first',
+          message: 'Settings → SentinelGraph, then connect your codebase.' });
+        return;
+      }
+      try {
+        const r = await window.devBrowserAPI.sentinel.scanCodebase();
+        if (!r) return; // dialog cancelled
+        get().addToast({ type: 'success', title: `Mapped ${r.repo}`,
+          message: `${r.services} services, ${r.databases} databases, ${r.dependencies} dependencies, ${r.teams} teams (from ${r.source}).${r.replaced ? ' Replaced the previous map.' : ''}` });
+        await get().refreshSentinelGraph();
+      } catch (err) {
+        get().addToast({ type: 'warning', title: 'Could not scan the codebase',
+          message: err instanceof Error ? err.message : String(err) });
+      }
+    },
+    breakService: async (service, kind) => {
+      if (!window.devBrowserAPI || get().sentinelStatus !== 'connected') return;
+      try {
+        const r = await window.devBrowserAPI.sentinel.breakService(service, kind);
+        const who = r.alerting_services.length ? ` ${r.alerting_services.join(', ')} ${r.alerting_services.length === 1 ? 'is' : 'are'} alerting.` : '';
+        get().addToast({ type: 'warning', title: `${service} is ${kind === 'degrade' ? 'degraded' : 'down'}`, message: `${who} Press Investigate.`.trim() });
+        set({ sentinelRun: summarizeRun(null) });
+        await get().refreshSentinelGraph();
+      } catch (err) {
+        get().addToast({ type: 'warning', title: `Could not break ${service}`, message: err instanceof Error ? err.message : String(err) });
+      }
+    },
+    restoreHealthy: async () => {
+      if (!window.devBrowserAPI || get().sentinelStatus !== 'connected') return;
+      try {
+        await window.devBrowserAPI.sentinel.restoreHealthy();
+        set({ sentinelRun: summarizeRun(null) });
+        get().addToast({ type: 'success', title: 'System restored', message: 'Every service is healthy again.' });
+        await get().refreshSentinelGraph();
+      } catch (err) {
+        get().addToast({ type: 'warning', title: 'Could not restore', message: err instanceof Error ? err.message : String(err) });
+      }
     },
     restoreSentinel: async () => {
       if (!window.devBrowserAPI) return;

@@ -114,7 +114,7 @@ jobs:
         working-directory: DevBrowser
         run: |
           npm ci
-          SENTINEL_SANDBOX=1 SENTINEL_URL=http://localhost:8200 SENTINEL_ADMIN_TOKEN=sandbox-token \
+          SENTINEL_SANDBOX=1 SENTINEL_URL=http://localhost:8200 \
             npx vitest run tests/unit/sandbox-live.test.ts tests/unit/sentinel-live.test.ts
       - name: The DevBrowser app end to end (Electron, real pages, real menu shortcuts)
         run: |

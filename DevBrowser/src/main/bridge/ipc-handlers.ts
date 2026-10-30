@@ -1,4 +1,4 @@
-import { app, ipcMain, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
 import os from 'node:os';
 import { IPC_CHANNELS, type HardwareMetrics } from '../../shared/ipc-channels';
 import type { PartitionManager } from '../session/partition-manager';
@@ -10,7 +10,7 @@ import { OllamaClient } from '../ai/ollama-client';
 import { CredentialVault } from '../crypto/vault';
 import { PassiveSecurityAuditor } from '../security/auditor';
 import type { SentinelGraphClient } from '../integrations/sentinel-client';
-import type { InvestigationEvidence } from '../../shared/domain/sentinel';
+import type { ChaosKind, InvestigationEvidence } from '../../shared/domain/sentinel';
 
 const BROWSING_PARTITIONS = PROFILES.map(p => p.key);
 
@@ -199,9 +199,9 @@ export function registerIpcHandlers(
     }
   });
 
-  // 5. SentinelGraph: the TigerGraph-backed dependency graph. The admin token stays in the main process.
-  ipcMain.handle(IPC_CHANNELS.SENTINEL_CONFIGURE, async (_event, args: { baseUrl: string; adminToken: string }) => {
-    sentinelClient.configure(args.baseUrl, args.adminToken);
+  // 5. SentinelGraph: the TigerGraph-backed dependency graph.
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_CONFIGURE, async (_event, args: { baseUrl: string }) => {
+    sentinelClient.configure(args.baseUrl);
     return sentinelClient.status();
   });
 
@@ -229,6 +229,20 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.SENTINEL_RESOLVE, async (_event, args: { url: string }) =>
     sentinelClient.resolve(args.url));
+
+  // The folder is chosen in a native dialog, so the renderer never supplies an arbitrary path to read.
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_SCAN_CODEBASE, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options = { title: 'Choose your codebase', properties: ['openDirectory' as const] };
+    const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    if (picked.canceled || !picked.filePaths[0]) return null;
+    return sentinelClient.scanCodebase(picked.filePaths[0]);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_BREAK_SERVICE, async (_event, args: { service: string; kind: ChaosKind }) =>
+    sentinelClient.breakService(args.service, args.kind));
+
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_RESTORE_HEALTHY, async () => sentinelClient.restoreHealthy());
 
   ipcMain.handle(IPC_CHANNELS.SENTINEL_CURRENT_RUN, async () => sentinelClient.currentRun());
 

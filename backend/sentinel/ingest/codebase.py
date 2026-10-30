@@ -18,6 +18,7 @@ package manifest is a service; their dependencies then come from traces and brow
 `apply(graph, manifest)` writes it. It never resets runtime state: a re-scan of a broken system leaves
 statuses, alerts and incidents alone.
 """
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -29,14 +30,27 @@ from ..db import Batch, Graph, link, upsert
 from .otel import record_change
 
 COMPOSE_FILES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
-DATA_STORES = {"postgres": "postgresql", "mysql": "mysql", "mariadb": "mysql", "mongo": "mongodb",
+DATA_STORES = {"zookeeper": "zookeeper", "dynamodb": "dynamodb", "kafka": "kafka", "rabbitmq": "rabbitmq", "nats": "nats", "postgres": "postgresql", "mysql": "mysql", "mariadb": "mysql", "mongo": "mongodb",
                "redis": "redis", "valkey": "redis", "memcached": "memcached", "elasticsearch": "elasticsearch",
                "opensearch": "elasticsearch", "cassandra": "cassandra", "clickhouse": "clickhouse",
                "cockroach": "cockroachdb"}
 LANGUAGES = (("package.json", "javascript"), ("tsconfig.json", "typescript"), ("pyproject.toml", "python"),
              ("requirements.txt", "python"), ("go.mod", "go"), ("pom.xml", "java"), ("build.gradle", "java"),
-             ("Cargo.toml", "rust"), ("Gemfile", "ruby"), ("composer.json", "php"))
-SERVICE_DIRS = (".", "services", "apps", "packages")
+             ("build.gradle.kts", "java"), ("Cargo.toml", "rust"), ("Gemfile", "ruby"), ("composer.json", "php"),
+             ("mix.exs", "elixir"), ("CMakeLists.txt", "cpp"), ("*.csproj", "csharp"), ("*.fsproj", "fsharp"),
+             ("*.slnx", "csharp"), ("*.sln", "csharp"), ("Directory.Build.props", "csharp"))
+DOCKER_BASES = (("golang", "go"), ("node", "javascript"), ("python", "python"), ("openjdk", "java"),
+                ("eclipse-temurin", "java"), ("gradle", "java"), ("maven", "java"), ("rust", "rust"),
+                ("ruby", "ruby"), ("php", "php"), ("dotnet", "csharp"), ("elixir", "elixir"), ("gcc", "cpp"))
+SERVICE_DIRS = (".", "src", "services", "apps", "packages", "cmd", "microservices")
+# Where a monorepo keeps a service's code when the compose file builds everything from the repo root.
+CODE_ROOTS = ("src", "services", "apps", "packages", "cmd", "microservices", "")
+# Services that observe or drive the system rather than being part of it. They are not services of the
+# product, and an edge to them (every service exports telemetry) would put the whole system in every blast
+# radius. Override per service with the label `sentinel.ignore: "true" | "false"`.
+PLUMBING = re.compile(r"(otel-?collector|opentelemetry-collector|otelcol|jaeger|prometheus|grafana|loki|tempo|"
+                      r"alertmanager|flagd|load-?gen|locust|k6$|traffic-?gen|zipkin|kafka-?(gui|ui)|kafdrop|pgadmin|adminer|"
+                      r"mailhog|mailpit|(^|-)init$|(^|-)sim$|migrat)", re.I)
 TIERS = ("critical", "high", "medium", "low")
 MAX_CHANGES_PER_SERVICE = 5
 
@@ -68,18 +82,105 @@ def _ports(spec: Any) -> list[tuple[str, str]]:
     return [(a, b) for a, b in out if a.isdigit() and b.isdigit()]
 
 
-def _language(path: Path) -> str:
-    for marker, lang in LANGUAGES:
-        if (path / marker).exists():
-            if lang == "javascript" and (path / "tsconfig.json").exists():
-                return "typescript"
-            return lang
+def _dotenv(repo: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    try:
+        lines = (repo / ".env").read_text().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        k, sep, v = line.strip().partition("=")
+        if sep and k and not k.startswith("#"):
+            out[k.removeprefix("export ").strip()] = v.strip().strip("\"'")
+    return out
+
+
+def _interpolate(text: str, env: dict[str, str]) -> str:
+    """Docker Compose variable substitution: `${VAR}`, `${VAR:-default}`, `${VAR-default}`, `$VAR`, `$$`."""
+    def one(m: re.Match) -> str:
+        if m.group(0) == "$$":
+            return "$"
+        name, default = m.group("name") or m.group("bare"), m.group("default")
+        return env.get(name) or default or ""
+    return re.sub(r"\$\$|\$\{(?P<name>\w+)(?::?-(?P<default>[^}]*))?\}|\$(?P<bare>[A-Za-z_]\w*)", one, text)
+
+
+def _has(path: Path, marker: str) -> bool:
+    return bool(next(path.glob(marker), None)) if "*" in marker else (path / marker).exists()
+
+
+def _language(path: Path, dockerfile: Path | None = None) -> str:
+    """From manifests in the directory, then one level down (`src/cart/src/Cart.csproj`), then the Dockerfile's base image."""
+    if path.is_dir():
+        dirs = [path] + sorted(d for d in path.iterdir() if d.is_dir() and not d.name.startswith((".", "node_modules")))[:30]
+        for d in dirs:
+            for marker, lang in LANGUAGES:
+                if _has(d, marker):
+                    if lang == "javascript" and _has(d, "tsconfig.json"):
+                        return "typescript"
+                    return lang
+    if dockerfile is None and (path / "Dockerfile").is_file():
+        dockerfile = path / "Dockerfile"
+    if dockerfile and dockerfile.is_file():
+        for line in dockerfile.read_text(errors="ignore").splitlines():
+            if line.strip().upper().startswith("FROM "):
+                image = line.split()[1].lower().split("/")[-1]
+                for base, lang in DOCKER_BASES:
+                    if image.startswith(base):
+                        return lang
+    return ""
+
+
+def _service_dir(repo: Path, name: str, context: str, dockerfile: str) -> str:
+    """The directory holding a service's code. The build context when it is a subdirectory; otherwise (a monorepo
+    that builds everything from the root) `src/<name>`-style folders, then the Dockerfile's folder."""
+    def inside(rel: str) -> bool:
+        p = (repo / rel).resolve()
+        return p.is_dir() and p != repo and repo in p.parents
+
+    if context and context not in (".", "./", "/") and inside(context):
+        return Path(context).as_posix().removeprefix("./").rstrip("/")
+    for root in CODE_ROOTS:
+        rel = f"{root}/{name}".strip("/")
+        if inside(rel):
+            return rel
+    # `spring-petclinic-api-gateway/` for the service `api-gateway`: a unique folder ending in the service name
+    for root in CODE_ROOTS:
+        base = repo / root if root else repo
+        hits = [d.name for d in base.iterdir() if d.is_dir() and not d.name.startswith(".")
+                and d.name.endswith(f"-{name}")] if base.is_dir() else []
+        if len(hits) == 1:
+            return f"{root}/{hits[0]}".strip("/")
+    if dockerfile:
+        parent = Path(dockerfile).parent.as_posix().removeprefix("./")
+        if parent not in ("", ".") and inside(parent):
+            return parent
     return ""
 
 
 def _store(image: str, name: str) -> str | None:
     base = image.split("/")[-1].split(":")[0].lower() if image else name.lower()
     return next((engine for key, engine in DATA_STORES.items() if key in base), None)
+
+
+def _store_name(name: str) -> str | None:
+    """A data store by its name alone: `mysql`, `orders-db`, `session-cache` (for services built from a folder or
+    images whose name says nothing)."""
+    n = name.lower()
+    if n in DATA_STORES:
+        return DATA_STORES[n]
+    if re.search(r"(^|-)(db|database|cache|queue)$", n):
+        return next((e for k, e in DATA_STORES.items() if k in n), "database")
+    if not re.search(r"service|api|worker|gateway|app|proxy|consumer|producer|client", n):
+        return next((e for k, e in DATA_STORES.items() if len(k) >= 5 and n.startswith(k)), None)  # dynamodblocal
+    return None
+
+
+def _plumbing(name: str, image: str, labels: dict[str, str]) -> bool:
+    flag = labels.get("sentinel.ignore", "").lower()
+    if flag in ("true", "false"):
+        return flag == "true"
+    return bool(PLUMBING.search(name) or PLUMBING.search(image.split("/")[-1].split(":")[0]))
 
 
 def _owners(repo: Path) -> list[tuple[str, str]]:
@@ -106,11 +207,151 @@ def _owner(rules: list[tuple[str, str]], rel: str) -> str | None:
     return team
 
 
-def _compose(repo: Path) -> dict[str, Any] | None:
+def _walk(node: Any, env: dict[str, str]) -> Any:
+    """Variable substitution on every string of a parsed document (text-level substitution can break the YAML)."""
+    if isinstance(node, str):
+        return _interpolate(node, env)
+    if isinstance(node, list):
+        return [_walk(x, env) for x in node]
+    if isinstance(node, dict):
+        return {_walk(k, env): _walk(v, env) for k, v in node.items()}
+    return node
+
+
+COMPOSE_DIRS = ("deploy", "docker", "deployment", "deployments", "compose", "infra", "ops", "docker-compose")
+
+
+def _find_compose(repo: Path) -> Path | None:
+    """The repo's compose file: at the root, else one or two folders down in the usual places (`deploy/docker-compose/`)."""
     for name in COMPOSE_FILES:
-        if (repo / name).exists():
-            return yaml.safe_load((repo / name).read_text()) or {}
+        if (repo / name).is_file():
+            return repo / name
+    for d in COMPOSE_DIRS:
+        for base in (repo / d, *sorted((repo / d).glob("*/"))[:10]):
+            for name in COMPOSE_FILES:
+                if (base / name).is_file():
+                    return base / name
     return None
+
+
+def _compose(repo: Path) -> tuple[dict[str, Any], Path] | None:
+    path = _find_compose(repo)
+    if path is None:
+        return None
+    env = {**_dotenv(repo), **_dotenv(path.parent)}
+    text = path.read_text()
+    try:
+        doc = _walk(yaml.safe_load(text) or {}, env)  # substitute per value: `image: redis:${TAG}` with TAG unset stays valid
+    except yaml.YAMLError:
+        try:  # Compose substitutes before parsing, so `[A=${PORT}]` is valid for it though not for plain YAML
+            doc = yaml.safe_load(_interpolate(text, env)) or {}
+        except yaml.YAMLError as exc:
+            raise ValueError(f"{path.relative_to(repo)} is not valid YAML: {str(exc).splitlines()[0]}") from exc
+    return (doc if isinstance(doc, dict) else {}), path.parent
+
+
+K8S_KINDS = ("Deployment", "StatefulSet", "DaemonSet")
+K8S_SKIP = {".git", ".github", "node_modules", "vendor", "charts", "helm-chart", "terraform", "test", "tests"}
+
+
+def _k8s_docs(repo: Path) -> list[dict]:
+    docs = []
+    for f in sorted(list(repo.rglob("*.yaml")) + list(repo.rglob("*.yml")))[:2000]:
+        rel = f.relative_to(repo).parts
+        if len(rel) > 5 or K8S_SKIP & set(rel[:-1]):
+            continue
+        text = f.read_text(errors="ignore")
+        if "{{" in text or "kind:" not in text:  # Helm templates are not YAML until rendered
+            continue
+        try:
+            docs += [d for d in yaml.safe_load_all(text) if isinstance(d, dict) and d.get("kind")]
+        except yaml.YAMLError:
+            continue
+    return docs
+
+
+def _kubernetes(repo: Path, rules: list[tuple[str, str]]) -> dict[str, Any] | None:
+    """Services from Kubernetes manifests: a Deployment is a service, and `host:port` or URL values in its
+    environment that name another Deployment or Service are its dependencies."""
+    docs = _k8s_docs(repo)
+    workloads: dict[str, dict] = {}
+    for d in docs:
+        if d["kind"] in K8S_KINDS:
+            meta = d.get("metadata") or {}
+            name = meta.get("name")
+            pod = ((d.get("spec") or {}).get("template") or {}).get("spec") or {}
+            containers = pod.get("containers") or []
+            if not name or not containers:
+                continue
+            w = workloads.setdefault(name, {"labels": {}, "env": [], "image": "", "ports": set(), "selector": name})
+            w["labels"].update({k: str(v) for k, v in (meta.get("labels") or {}).items()})
+            w["image"] = w["image"] or str(containers[0].get("image", ""))
+            for c in containers:
+                w["env"] += [str(e.get("value", "")) for e in c.get("env") or [] if isinstance(e, dict)]
+                w["ports"] |= {str(p["containerPort"]) for p in c.get("ports") or [] if "containerPort" in p}
+            sel = ((d.get("spec") or {}).get("selector") or {}).get("matchLabels") or {}
+            w["selector"] = str(sel.get("app") or sel.get("app.kubernetes.io/name") or name)
+    if not workloads:
+        return None
+    svc_of: dict[str, str] = {}  # Kubernetes Service name -> workload
+    published: set[str] = set()
+    aliases: dict[str, str] = {}
+    by_selector = {w["selector"]: n for n, w in workloads.items()}
+    for d in docs:
+        if d["kind"] != "Service":
+            continue
+        name = (d.get("metadata") or {}).get("name")
+        spec = d.get("spec") or {}
+        target = by_selector.get(str((spec.get("selector") or {}).get("app", ""))) or (name if name in workloads else None)
+        if not (name and target):
+            continue
+        svc_of[name] = target
+        if spec.get("type") in ("LoadBalancer", "NodePort"):
+            published.add(target)
+        for p in spec.get("ports") or []:
+            aliases[f"{name}:{p.get('port')}"] = target
+            if p.get("nodePort"):
+                aliases[f"localhost:{p['nodePort']}"] = target
+    services: dict[str, dict] = {}
+    databases: dict[str, str] = {}
+    ignored: list[str] = []
+    for name, w in workloads.items():
+        if _plumbing(name, w["image"], w["labels"]):
+            ignored.append(name)
+            continue
+        engine = _store(w["image"], name) or _store_name(name)
+        if engine and not _service_dir(repo, name, "", ""):
+            databases[name] = engine
+            continue
+        rel = _service_dir(repo, name, "", "")
+        tier = w["labels"].get("sentinel.tier", "medium")
+        services[name] = {
+            "name": name, "path": rel, "language": _language(repo / rel) if rel else "",
+            "tier": tier if tier in TIERS else "medium",
+            "revenue_per_min": int(w["labels"].get("sentinel.revenue_per_min", "0") or 0),
+            "team": w["labels"].get("sentinel.team") or (_owner(rules, rel) if rel else None),
+            "published": name in published, "layer": w["labels"].get("sentinel.layer")}
+        aliases[name] = name
+        for port in w["ports"]:
+            aliases[f"{name}:{port}"] = name
+    known = {**{n: n for n in workloads}, **svc_of}
+    deps: set[tuple[str, str]] = set()
+    for name, w in workloads.items():
+        if name in ignored:
+            continue
+        for value in w["env"]:
+            for host in re.findall(r"(?:://|@|^)([a-z0-9][a-z0-9.-]*)(?::\d+|/|$)", value.strip()):
+                target = known.get(host.split(".")[0])
+                if target and target != name and target not in ignored:
+                    deps.add((name, target))
+    return {"services": services, "databases": databases, "deps": deps, "aliases": aliases, "ignored": ignored}
+
+
+def _dockerfile(repo: Path, context: str, dockerfile: str) -> Path | None:
+    if not dockerfile:
+        return None
+    p = repo / context / dockerfile if context else repo / dockerfile
+    return p if p.is_file() else None
 
 
 def _git_changes(repo: Path, paths: dict[str, str], since: str) -> list[dict]:
@@ -143,17 +384,30 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
     databases: dict[str, str] = {}
     deps: set[tuple[str, str]] = set()
     aliases: dict[str, str] = {}
-    compose = _compose(repo)
+    ignored: list[str] = []
+    found = _compose(repo)
+    compose, base = found if found else (None, repo)
+    k8s = None if compose is not None else _kubernetes(repo, rules)
+
+    def from_repo(rel: str) -> str:
+        """A path in the compose file is relative to the compose file; the rest of the scan to the repo."""
+        if not rel:
+            return ""
+        return os.path.relpath((base / rel).resolve(), repo)
 
     if compose is not None:
         specs = compose.get("services") or {}
         for name, spec in specs.items():
             spec = spec or {}
             build = spec.get("build")
-            context = build.get("context", ".") if isinstance(build, dict) else build
-            rel = str(Path(context).as_posix()).removeprefix("./") if context else ""
+            context = from_repo(str(build.get("context", ".") if isinstance(build, dict) else build or ""))
+            dockerfile = str(build.get("dockerfile", "") if isinstance(build, dict) else "")
             labels = _as_dict(spec.get("labels"))
-            engine = _store(str(spec.get("image", "")), name) if not build else None
+            if _plumbing(name, str(spec.get("image", "")), labels):
+                ignored.append(name)
+                continue
+            engine = (_store(str(spec.get("image", "")), name) if not build else None) or _store_name(name)
+            rel = "" if engine else _service_dir(repo, name, context, dockerfile)
             for published, target in _ports(spec.get("ports")):
                 aliases[f"localhost:{published}"] = name
                 aliases[f"{name}:{target}"] = name
@@ -163,13 +417,14 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
                 continue
             tier = labels.get("sentinel.tier", "medium")
             services[name] = {
-                "name": name, "path": rel, "language": _language(repo / rel) if rel else "",
+                "name": name, "path": rel,
+                "language": _language(repo / rel, _dockerfile(repo, context, dockerfile)) if rel or dockerfile else "",
                 "tier": tier if tier in TIERS else "medium",
                 "revenue_per_min": int(labels.get("sentinel.revenue_per_min", "0") or 0),
                 "team": labels.get("sentinel.team") or (_owner(rules, rel) if rel else None),
                 "published": bool(_ports(spec.get("ports"))), "layer": labels.get("sentinel.layer"),
             }
-        names = set(specs)
+        names = set(specs) - set(ignored)
         for name, spec in specs.items():
             if name not in services:
                 continue
@@ -179,12 +434,17 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
             for value in _as_dict(spec.get("environment")).values():
                 targets |= {h for h in re.findall(r"(?:://|@|^)([a-z0-9][a-z0-9_-]*)(?::\d+|/|$)", value) if h in names}
             deps |= {(name, t) for t in targets if t != name and t in names}
+    elif k8s is not None:
+        services, databases, deps = k8s["services"], k8s["databases"], k8s["deps"]
+        aliases, ignored = k8s["aliases"], k8s["ignored"]
     else:
         for parent in SERVICE_DIRS:
-            base = repo / parent
-            if not base.is_dir():
+            folder = repo / parent
+            if not folder.is_dir():
                 continue
-            for d in sorted(base.iterdir()):
+            for d in sorted(folder.iterdir()):
+                if parent == "." and d.name in CODE_ROOTS:
+                    continue  # `src/` holds services, it is not one
                 if d.is_dir() and not d.name.startswith(".") and (lang := _language(d)):
                     rel = d.relative_to(repo).as_posix()
                     services[d.name] = {"name": d.name, "path": rel, "language": lang, "tier": "medium",
@@ -202,8 +462,9 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
         "databases": [{"name": n, "engine": e} for n, e in sorted(databases.items())],
         "dependencies": sorted([a, b] for a, b in deps),
         "aliases": dict(sorted(aliases.items())),
+        "ignored": sorted(ignored),
         "changes": _git_changes(repo, {s["name"]: s["path"] for s in services.values()}, since),
-        "source": "docker-compose" if compose is not None else "directories",
+        "source": "docker-compose" if compose is not None else "kubernetes" if k8s is not None else "directories",
     }
 
 

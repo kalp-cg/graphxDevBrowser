@@ -160,7 +160,7 @@ def test_browser_traffic_through_the_api(graph, monkeypatch):
 
     try:
         seed_baseline(graph)
-        with TestClient(app, headers={"X-Admin-Token": "test-admin-token"}) as c:
+        with TestClient(app) as c:
             out = c.post("/api/browser-traffic", json=browser_records()).json()
             assert out["components"] == 3 and out["alerting"] == []  # passive capture: topology only
             assert "payments.shop.local" not in unhealthy(graph) and firing(graph) == 0

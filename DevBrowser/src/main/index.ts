@@ -46,7 +46,7 @@ async function createWindow(): Promise<BrowserWindow> {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 960,
-    minWidth: 1024,
+    minWidth: 640,
     minHeight: 700,
     title: 'Dev Browser',
     titleBarStyle: 'hiddenInset',
@@ -102,9 +102,9 @@ app.whenReady().then(async () => {
   ollamaClient = new OllamaClient(envConfig.OLLAMA_HOST, envConfig.DEFAULT_AI_MODEL);
   credentialVault = new CredentialVault();
   securityAuditor = new PassiveSecurityAuditor();
-  // The SentinelGraph connection survives restarts; the token is saved only as keychain-encrypted ciphertext.
+  // The SentinelGraph connection survives restarts; only the address is saved.
   const connectionFile = path.join(app.getPath('userData'), 'sentinelgraph.json');
-  sentinelClient = new SentinelGraphClient(credentialVault, undefined, {
+  sentinelClient = new SentinelGraphClient(undefined, {
     load: () => {
       try {
         return JSON.parse(fs.readFileSync(connectionFile, 'utf8'));

@@ -64,6 +64,30 @@ export interface SentinelStatus {
   services?: number;
 }
 
+/** What a codebase scan found (`POST /api/workspace/scan`). */
+export interface CodebaseScanResult {
+  repo: string;
+  source: string;
+  services: number;
+  databases: number;
+  dependencies: number;
+  teams: number;
+  changes: number;
+  aliases: number;
+  service_names: string[];
+  /** True when this repository replaced a different system's map. */
+  replaced?: boolean;
+}
+
+/** How a service is broken for a demo: crashed or slowed, with or without a bad deploy as the cause. */
+export type ChaosKind = 'deploy' | 'crash' | 'degrade';
+
+export interface ChaosResult {
+  title: string;
+  target: string;
+  alerting_services: string[];
+}
+
 /** One captured API call, as `POST /api/browser-traffic` takes it. */
 export interface BrowserTrafficRecord {
   pageUrl: string;
@@ -264,17 +288,23 @@ export function toEvidence(tx: NetworkTransaction, pageUrl: string): Investigati
   return { url: tx.url, method: tx.method, status_code: status, page_url: pageUrl.startsWith('http') ? pageUrl : '' };
 }
 
+/** Tools that describe the whole system rather than this incident; their nodes are not part of the failure path. */
+const CONTEXT_TOOLS = new Set(['critical_services', 'chokepoints']);
+
 export function summarizeRun(run: SentinelRun | null): RunSummary {
   const path = { nodes: [] as string[], edges: [] as string[], currentNodes: [] as string[], currentEdges: [] as string[] };
   const empty: RunSummary = { phase: 'idle', steps: [], rootCause: null, report: null, seconds: null, proposed: [], path };
   if (!run || !run.run_id) return empty;
   const results = run.events.filter(e => e.type === 'tool_result');
   const steps = results.map(e => ({ name: e.name ?? '', summary: e.summary ?? '', error: Boolean(e.error) }));
-  const last = results[results.length - 1];
-  path.nodes = [...new Set(results.flatMap(e => e.node_uids ?? []))];
-  path.edges = [...new Set(results.flatMap(e => e.edge_uids ?? []))];
-  path.currentNodes = last?.node_uids ?? [];
-  path.currentEdges = last?.edge_uids ?? [];
+  // The graph lights up what the investigation found about this incident. Rankings (the most critical services of the
+  // whole system) are context: lighting them up makes unrelated services look like part of the failure.
+  const evidence = results.filter(e => !CONTEXT_TOOLS.has(e.name ?? ''));
+  const last = evidence[evidence.length - 1];
+  path.nodes = [...new Set(evidence.flatMap(e => e.node_uids ?? []))];
+  path.edges = [...new Set(evidence.flatMap(e => e.edge_uids ?? []))];
+  path.currentNodes = results[results.length - 1] === last ? last?.node_uids ?? [] : [];
+  path.currentEdges = results[results.length - 1] === last ? last?.edge_uids ?? [] : [];
   const proposed = run.events.filter(e => e.type === 'action_proposed' && e.action).map(e => e.action as SentinelAction);
   const end = run.events[run.events.length - 1];
   if (end?.type === 'error') return { ...empty, phase: 'failed', steps, path, report: end.message ?? 'Investigation failed' };

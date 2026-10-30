@@ -10,9 +10,14 @@ import {
 import { useAppStore } from '../../store/useAppStore';
 import { Badge } from '../common/Badge';
 import { EmptyState } from '../common/EmptyState';
+import { SiteScope } from '../common/SiteScope';
+import { forSite, siteOf } from '../../../shared/domain/browser';
 
 export const SecurityView: React.FC = () => {
-  const findings = useAppStore(s => s.findings);
+  const allFindings = useAppStore(s => s.findings);
+  const currentUrl = useAppStore(s => s.currentUrl);
+  const history = useAppStore(s => s.securityHistory);
+  const setHistory = useAppStore(s => s.setSecurityHistory);
   const selectedFindingId = useAppStore(s => s.selectedFindingId);
   const setSelectedFindingId = useAppStore(s => s.setSelectedFindingId);
   const securitySeverityFilter = useAppStore(s => s.securitySeverityFilter);
@@ -22,6 +27,8 @@ export const SecurityView: React.FC = () => {
 
   const [copiedSnippet, setCopiedSnippet] = useState(false);
 
+  // The open website's findings; History is every page seen, newest first.
+  const findings = history ? [...allFindings].sort((a, b) => b.timestamp - a.timestamp) : forSite(allFindings, currentUrl);
   const filteredFindings = findings.filter(f => {
     if (securitySeverityFilter === 'all') return true;
     return f.severity === securitySeverityFilter;
@@ -111,6 +118,8 @@ export const SecurityView: React.FC = () => {
             <Badge label="Zero Synthetic Traffic" variant="success" />
           </div>
 
+          <SiteScope history={history} onChange={setHistory} currentUrl={currentUrl} site={siteOf(currentUrl)} total={allFindings.length} />
+
           <div style={{ display: 'flex', gap: '4px', background: 'var(--bg-tertiary)', borderRadius: '6px', padding: '2px' }}>
             {['all', 'HIGH', 'MEDIUM', 'LOW'].map(lvl => (
               <button
@@ -139,8 +148,10 @@ export const SecurityView: React.FC = () => {
           {filteredFindings.length === 0 ? (
             <EmptyState
               icon={<ShieldCheck size={32} color="var(--accent-emerald)" />}
-              title="No Security Findings Detected"
-              description="All evaluated HTTP response headers, cookie flags, and DOM sinks satisfy active OWASP passive audit rules."
+              title={history ? 'No findings in the history' : siteOf(currentUrl) ? 'No findings for this site' : 'No page open'}
+              description={history ? 'Nothing has been captured yet. Browse a site and its findings will be kept here.'
+                : siteOf(currentUrl) ? 'The responses captured for this website satisfy the passive audit rules. Use History for earlier sites.'
+                  : 'Open a page to see its security findings. Use History for sites you visited earlier.'}
             />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -177,6 +188,11 @@ export const SecurityView: React.FC = () => {
                     <div style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {f.evidence.url}
                     </div>
+                    {history && f.pageUrl && (
+                      <div style={{ fontSize: '10px', color: 'var(--accent)', marginTop: 3, fontFamily: 'var(--font-mono)' }}>
+                        found on {siteOf(f.pageUrl).replace(/^https?:\/\//, '')}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -276,7 +292,8 @@ export const SecurityView: React.FC = () => {
                 borderRadius: '8px',
                 padding: '12px',
                 fontFamily: 'var(--font-mono)',
-                fontSize: '12px'
+                fontSize: '12px',
+                overflowWrap: 'anywhere'
               }}>
                 <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>
                   Target: <span style={{ color: 'var(--text-primary)' }}>{selectedFinding.evidence.url}</span>
@@ -286,7 +303,8 @@ export const SecurityView: React.FC = () => {
                   background: 'var(--bg-primary)',
                   padding: '8px',
                   borderRadius: '4px',
-                  overflowX: 'auto'
+                  whiteSpace: 'pre-wrap',
+                  overflowWrap: 'anywhere'
                 }}>
                   {selectedFinding.evidence.rawSnippet || 'No raw snippet attached.'}
                 </pre>

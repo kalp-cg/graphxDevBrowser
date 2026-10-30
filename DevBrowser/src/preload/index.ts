@@ -42,8 +42,7 @@ const devBrowserAPI: DevBrowserAPI = {
     clearFindings: () => ipcRenderer.invoke(IPC_CHANNELS.SECURITY_CLEAR_FINDINGS)
   },
   sentinel: {
-    configure: (baseUrl: string, adminToken: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_CONFIGURE, { baseUrl, adminToken }),
+    configure: (baseUrl: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_CONFIGURE, { baseUrl }),
     status: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_STATUS),
     getGraph: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_GET_GRAPH),
     blastRadius: (service: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_BLAST_RADIUS, { service }),
@@ -53,7 +52,10 @@ const devBrowserAPI: DevBrowserAPI = {
     resolve: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_RESOLVE, { url }),
     currentRun: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_CURRENT_RUN),
     approveAction: (uid: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_APPROVE_ACTION, { uid }),
-    rejectAction: (uid: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_REJECT_ACTION, { uid })
+    rejectAction: (uid: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_REJECT_ACTION, { uid }),
+    scanCodebase: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_SCAN_CODEBASE),
+    breakService: (service: string, kind: string) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_BREAK_SERVICE, { service, kind }),
+    restoreHealthy: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_RESTORE_HEALTHY)
   },
   privacy: {
     triggerNuclearShred: () => ipcRenderer.invoke(IPC_CHANNELS.PRIVACY_TRIGGER_NUCLEAR_SHRED)

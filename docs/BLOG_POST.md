@@ -143,7 +143,7 @@ Several people who saw the project said: "Why doesn't the agent just fix it auto
 - **GitHub**: [https://github.com/kalp-cg/graph-hacks](https://github.com/kalp-cg/graph-hacks)
 - **One-command local run**: `git clone ... && docker compose up`
 
-Click **db-pool-exhaustion**, then **Investigate**, then **Approve**. With the autopilot the investigation takes 16–24 seconds (measured on the live site); a local 8B model takes 46–94 seconds. Then break `kafka-rebalance-storm`, approve, break it again, and watch the memory shortcut kick in (8 steps, then 6). Write actions ask for an admin token the first time you use them.
+Click **db-pool-exhaustion**, then **Investigate**, then **Approve**. With the autopilot the investigation takes 16–24 seconds (measured on the live site); a local 8B model takes 46–94 seconds. Then break `kafka-rebalance-storm`, approve, break it again, and watch the memory shortcut kick in (8 steps, then 6).
 
 ---
 

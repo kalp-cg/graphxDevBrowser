@@ -55,7 +55,7 @@ database can't do in one query.
 - **Actions don't touch real infrastructure.** "Rollback" only updates the graph; nothing is actually rolled back.
 - **The agent runs in "autopilot" (no LLM)** unless `GEMINI_API_KEY` or an OpenAI-compatible key is set in `.env`.
 - **The demo company is simulated.** No recording yet of a real system (e.g. the OpenTelemetry Demo) going through it.
-- **Single admin token**, no users, teams or tenants.
+- **No authentication at all** (the admin token was removed): anyone who can reach the API can write to the graph, run the agent and approve actions. Add real auth before exposing it beyond localhost.
 - **Interpreted GSQL** costs ~1–2 s per query, so an investigation takes ~20–30 s.
 - **Mock panels in DevBrowser:** the AI assistant, security findings, hardware stats and API client still show sample
   data in places. The old "TigerGraph & TGCloud" settings card sends the secret as a Bearer token (wrong; remove it
@@ -75,9 +75,9 @@ database can't do in one query.
 4. **Every task ends with tests passing:**
    - Backend: `cd backend && set -a && . ../.env && set +a && .venv/bin/python -m pytest -q` (~15 min; uses `Sentinel_test`)
    - Frontend: `cd frontend && npm run lint && npm run build`
-   - E2E: start API with `TG_GRAPH=Sentinel_e2e` + UI, then `cd e2e && ADMIN_TOKEN=... npx playwright test`
+   - E2E: start API with `TG_GRAPH=Sentinel_e2e` + UI, then `cd e2e && npx playwright test`
    - DevBrowser: `cd DevBrowser && npm run typecheck && npm run lint && npm test && npm run build`
-   - Live link: API running, then `SENTINEL_URL=http://localhost:8100 SENTINEL_ADMIN_TOKEN=... npm test` in DevBrowser
+   - Live link: API running, then `SENTINEL_URL=http://localhost:8100 npm test` in DevBrowser
 5. **Machine:** 16 GB RAM. Don't run TigerGraph or the full OpenTelemetry Demo locally; use TigerGraph Cloud and a
    cloud VM for the demo stack. Ask before starting Docker.
 6. **Honesty in the UI and pitch:** never show fake numbers as real. Label sample or demo data clearly.
@@ -139,7 +139,7 @@ Measure these on the real OpenTelemetry Demo, and keep the scripts in the repo:
 
 ```bash
 # backend API (main graph 'Sentinel')
-cd backend && set -a && . ../.env && set +a && ADMIN_TOKEN=dev-admin-token .venv/bin/uvicorn sentinel.api.main:app --port 8100
+cd backend && set -a && . ../.env && set +a && .venv/bin/uvicorn sentinel.api.main:app --port 8100
 # dashboard (dev)
 cd frontend && npm run dev -- -p 3001
 # DevBrowser

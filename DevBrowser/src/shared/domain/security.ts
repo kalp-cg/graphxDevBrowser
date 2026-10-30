@@ -25,6 +25,8 @@ export const SecurityFindingSchema = z.object({
   evidence: SecurityEvidenceSchema,
   cwe: z.number(),
   owaspCategory: z.string(),
+  /** The page (top-level URL) that was open when the response was audited. */
+  pageUrl: z.string().optional(),
   isIgnored: z.boolean().default(false),
   suppressionFingerprint: z.string()
 });

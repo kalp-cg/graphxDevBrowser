@@ -15,7 +15,6 @@ jobs:
       GRAPH_BACKEND: local
       TG_GRAPH: Sentinel_e2e
       LLM_PROVIDER: autopilot
-      ADMIN_TOKEN: ci-admin-token
       AUTOPILOT_DELAY_S: "0.2"
       NEXT_PUBLIC_API_URL: http://localhost:8100
     steps:

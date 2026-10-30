@@ -1,7 +1,10 @@
 import type { SecurityFinding, SecuritySeverity } from '../../shared/domain/security';
+import { siteOf } from '../../shared/domain/browser';
 
 export interface AuditContext {
   url: string;
+  /** The page that was open when this response arrived. */
+  pageUrl?: string;
   method: string;
   statusCode?: number;
   requestHeaders: Record<string, string>;
@@ -35,6 +38,7 @@ export class PassiveSecurityAuditor {
           description: 'The target origin failed to provide a Content-Security-Policy header, leaving the application exposed to Cross-Site Scripting (XSS).',
           remediation: "Add 'Content-Security-Policy: default-src \\'self\\'' to response headers.",
           url: ctx.url,
+        pageUrl: ctx.pageUrl,
           method: ctx.method,
           statusCode: ctx.statusCode,
           rawSnippet: 'Header "Content-Security-Policy" is absent in HTTP response',
@@ -49,6 +53,7 @@ export class PassiveSecurityAuditor {
           description: 'The Content-Security-Policy allows unsafe inline scripts or eval, weakening XSS mitigation.',
           remediation: "Remove 'unsafe-inline' and 'unsafe-eval' from your CSP and use nonces or sha256 hashes.",
           url: ctx.url,
+        pageUrl: ctx.pageUrl,
           method: ctx.method,
           statusCode: ctx.statusCode,
           rawSnippet: `Content-Security-Policy: ${csp}`,
@@ -69,6 +74,7 @@ export class PassiveSecurityAuditor {
           description: 'HTTPS response lacks the Strict-Transport-Security header, allowing potential SSL-stripping man-in-the-middle attacks.',
           remediation: "Add 'Strict-Transport-Security: max-age=31536000; includeSubDomains; preload'",
           url: ctx.url,
+        pageUrl: ctx.pageUrl,
           method: ctx.method,
           statusCode: ctx.statusCode,
           rawSnippet: 'Header "Strict-Transport-Security" is absent',
@@ -89,6 +95,7 @@ export class PassiveSecurityAuditor {
         description: 'The server returned Access-Control-Allow-Origin: * alongside Access-Control-Allow-Credentials: true, exposing authenticated responses to any origin.',
         remediation: 'Specify explicit trusted origins in Access-Control-Allow-Origin when credentials are supported.',
         url: ctx.url,
+        pageUrl: ctx.pageUrl,
         method: ctx.method,
         statusCode: ctx.statusCode,
         rawSnippet: 'Access-Control-Allow-Origin: *\nAccess-Control-Allow-Credentials: true',
@@ -109,6 +116,7 @@ export class PassiveSecurityAuditor {
           description: 'A Set-Cookie directive was transmitted over HTTPS without the Secure flag, allowing plaintext transmission over insecure redirects.',
           remediation: 'Append the "; Secure" attribute to all cookies issued over HTTPS.',
           url: ctx.url,
+        pageUrl: ctx.pageUrl,
           method: ctx.method,
           statusCode: ctx.statusCode,
           rawSnippet: `Set-Cookie: ${setCookie}`,
@@ -125,6 +133,7 @@ export class PassiveSecurityAuditor {
           description: 'A cookie was created without an explicit SameSite attribute, making it subject to browser default laxness and cross-site request forgery risks.',
           remediation: 'Configure cookies with "; SameSite=Lax" or "; SameSite=Strict".',
           url: ctx.url,
+        pageUrl: ctx.pageUrl,
           method: ctx.method,
           statusCode: ctx.statusCode,
           rawSnippet: `Set-Cookie: ${setCookie}`,
@@ -143,6 +152,7 @@ export class PassiveSecurityAuditor {
         description: 'An authentication token or secret was detected in the URL query string. URLs are logged in web server logs, proxy caches, and Referer headers.',
         remediation: 'Transmit authentication tokens in HTTP request headers (e.g. Authorization: Bearer <token>) or in the request body.',
         url: ctx.url,
+        pageUrl: ctx.pageUrl,
         method: ctx.method,
         statusCode: ctx.statusCode,
         rawSnippet: `URL: ${ctx.url}`,
@@ -161,6 +171,7 @@ export class PassiveSecurityAuditor {
         description: 'The server header reveals exact software versions (e.g. Apache/2.4.41), assisting automated attacker reconnaissance.',
         remediation: 'Suppress or genericize the Server and X-Powered-By response headers in web server configuration.',
         url: ctx.url,
+        pageUrl: ctx.pageUrl,
         method: ctx.method,
         statusCode: ctx.statusCode,
         rawSnippet: `Server Header: ${serverHeader}`,
@@ -191,13 +202,15 @@ export class PassiveSecurityAuditor {
     description: string;
     remediation: string;
     url: string;
+    pageUrl?: string;
     method: string;
     statusCode?: number;
     rawSnippet?: string;
     cwe: number;
     owaspCategory: string;
   }): SecurityFinding {
-    const fingerprint = `${opts.ruleId}-${new URL(opts.url).origin}`;
+    // One finding per rule, resource and website being browsed: the same resource seen from two sites is two findings.
+    const fingerprint = `${opts.ruleId}-${new URL(opts.url).origin}-${siteOf(opts.pageUrl)}`;
     return {
       id: crypto.randomUUID(),
       ruleId: opts.ruleId,
@@ -214,6 +227,7 @@ export class PassiveSecurityAuditor {
       },
       cwe: opts.cwe,
       owaspCategory: opts.owaspCategory,
+      pageUrl: opts.pageUrl,
       isIgnored: false,
       suppressionFingerprint: fingerprint
     };

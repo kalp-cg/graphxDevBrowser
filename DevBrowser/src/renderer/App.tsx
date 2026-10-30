@@ -16,6 +16,7 @@ import { ShortcutsModal } from './components/common/ShortcutsModal';
 import { ToastContainer } from './components/common/ToastContainer';
 import { useAppStore } from './store/useAppStore';
 import { useBrowserStore } from './store/useBrowserStore';
+import { FULL_PAGE_VIEWS, useNarrow } from './useNarrow';
 import { emulate, goBack, goForward, reload, toggleDevTools, zoom } from './browser/pages';
 import { DEVICES, SEARCH_URL } from '../shared/domain/browser';
 import type { BrowserCommand } from '../shared/ipc-channels';
@@ -66,6 +67,7 @@ export const App: React.FC = () => {
   const activeView = useAppStore(s => s.activeView);
   const panelMaximized = useAppStore(s => s.panelMaximized);
   const Panel = PANELS[activeView];
+  const narrow = useNarrow();
 
   useEffect(() => {
     const app = useAppStore.getState();
@@ -123,7 +125,7 @@ export const App: React.FC = () => {
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         <Sidebar />
         <main style={{ flex: 1, minWidth: 0, display: 'flex' }}>
-          <BrowserArea hidden={!!Panel && panelMaximized} />
+          <BrowserArea hidden={!!Panel && (panelMaximized || narrow || FULL_PAGE_VIEWS.has(activeView))} />
           {Panel && <ToolDock><Panel /></ToolDock>}
         </main>
       </div>

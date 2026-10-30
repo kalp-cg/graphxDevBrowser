@@ -9,6 +9,8 @@ export type TransactionListener = (transaction: NetworkTransaction, pageUrl: str
 export class CDPNetworkInterceptor {
   private activeWebContents: Set<number> = new Set();
   private pendingRequests: Map<string, Partial<NetworkTransaction>> = new Map();
+  /** The top-level page each tab is on, updated when a navigation starts (before its first request is made). */
+  private pages: Map<number, string> = new Map();
   private securityAuditor: PassiveSecurityAuditor;
   private onTransaction: TransactionListener | undefined;
 
@@ -20,6 +22,13 @@ export class CDPNetworkInterceptor {
   public attachToWebContents(webContents: WebContents, tabId: string): void {
     if (this.activeWebContents.has(webContents.id)) return;
     this.activeWebContents.add(webContents.id);
+    this.pages.set(webContents.id, webContents.getURL());
+    webContents.on('did-start-navigation', details => {
+      if (details.isMainFrame && !details.isSameDocument) this.pages.set(webContents.id, details.url);
+    });
+    webContents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+      if (isMainFrame) this.pages.set(webContents.id, url);
+    });
 
     try {
       if (!webContents.debugger.isAttached()) {
@@ -36,6 +45,7 @@ export class CDPNetworkInterceptor {
 
       webContents.on('destroyed', () => {
         this.activeWebContents.delete(webContents.id);
+        this.pages.delete(webContents.id);
       });
     } catch (err) {
       console.warn(`[CDPNetworkInterceptor] Could not attach to webContents ${webContents.id}:`, err);
@@ -67,6 +77,7 @@ export class CDPNetworkInterceptor {
         method: p.request.method,
         requestHeaders: p.request.headers,
         requestBody: p.request.postData,
+        pageUrl: this.pages.get(webContents.id) ?? webContents.getURL(),
         startTime: Math.round(p.wallTime * 1000)
       });
     } else if (method === 'Network.responseReceived') {
@@ -88,6 +99,7 @@ export class CDPNetworkInterceptor {
         url: p.response.url,
         method: 'GET',
         requestHeaders: {},
+        pageUrl: this.pages.get(webContents.id) ?? webContents.getURL(),
         startTime: Date.now()
       };
 
@@ -102,6 +114,7 @@ export class CDPNetworkInterceptor {
       // Run passive security audit on HTTP response
       this.securityAuditor.evaluateResponse({
         url: p.response.url,
+        pageUrl: pending.pageUrl,
         method: pending.method || 'GET',
         statusCode: p.response.status,
         requestHeaders: pending.requestHeaders || {},
@@ -137,7 +150,7 @@ export class CDPNetworkInterceptor {
           ui.send(IPC_CHANNELS.NETWORK_STREAM_TRANSACTION, transaction);
         }
         if (!webContents.isDestroyed()) {
-          this.onTransaction?.(transaction, webContents.getURL());
+          this.onTransaction?.(transaction, transaction.pageUrl ?? webContents.getURL());
         }
       }
     }

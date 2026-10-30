@@ -9,7 +9,7 @@
 
 `up` scans sandbox/shop as a codebase first (services, dependencies, owners and addresses from its compose
 file, CODEOWNERS and git), then lets real traces build health on top. Browse http://localhost:7400 in
-DevBrowser (Settings -> Integrations -> SentinelGraph: http://localhost:8200, token `sandbox-token`) and the
+DevBrowser (Settings -> Integrations -> SentinelGraph: http://localhost:8200) and the
 requests it captures land on the same services.
 """
 import argparse
@@ -30,7 +30,6 @@ BACKEND = ROOT / "backend"
 DATA = ROOT / "sandbox" / ".data"
 API = os.getenv("SANDBOX_API", "http://localhost:8200")
 CONTROL = "http://localhost:7499/__control"
-TOKEN = os.getenv("SANDBOX_TOKEN", "sandbox-token")
 PYTHON = str(BACKEND / ".venv" / "bin" / "python") if (BACKEND / ".venv" / "bin" / "python").exists() else sys.executable
 BAD_DEPLOYS = {
     "inventory": ("v2.4.1", "Reduce orders-db pool size to 2 to cut connection costs", "Priya Shah"),
@@ -43,7 +42,7 @@ BAD_DEPLOYS = {
 def env() -> dict[str, str]:
     """The API's environment: embedded graph, sandbox actions applied for real, deterministic agent."""
     return {**os.environ, "GRAPH_BACKEND": "local", "LOCAL_GRAPH_DIR": str(DATA), "TG_GRAPH": "Sandbox",
-            "ADMIN_TOKEN": TOKEN, "ACTION_ADAPTER": "sandbox", "ACTIONS_MODE": "live",
+            "ACTION_ADAPTER": "sandbox", "ACTIONS_MODE": "live",
             "SANDBOX_URL": CONTROL.removesuffix("/__control"),
             "LLM_PROVIDER": os.getenv("SANDBOX_LLM", "autopilot"), "AUTOPILOT_DELAY_S": os.getenv("AUTOPILOT_DELAY_S", "0.4"),
             "CORS_ORIGINS": "http://localhost:3002", "PYTHONUNBUFFERED": "1"}
@@ -51,7 +50,7 @@ def env() -> dict[str, str]:
 
 def http(method: str, url: str, body: Any = None, timeout: float = 30) -> Any:
     req = urllib.request.Request(url, json.dumps(body).encode() if body is not None else None, method=method,
-                                 headers={"Content-Type": "application/json", "X-Admin-Token": TOKEN})
+                                 headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read() or b"null")
 
@@ -81,7 +80,7 @@ def up(args: argparse.Namespace) -> None:
                                "--log-level", "warning"], cwd=BACKEND, env=env())]
     wait_for(f"{API}/api/health")
     procs.append(subprocess.Popen([PYTHON, str(ROOT / "sandbox" / "shop" / "run_shop.py"), "--sentinel", API,
-                                   "--token", TOKEN, "--rps", str(args.rps)], env=env()))
+                                   "--rps", str(args.rps)], env=env()))
     wait_for(CONTROL)
     if args.ui:
         procs.append(subprocess.Popen(["npm", "run", "dev", "--", "-p", "3002"], cwd=ROOT / "frontend",
@@ -89,9 +88,9 @@ def up(args: argparse.Namespace) -> None:
     print(f"""
 sandbox is up
   storefront   http://localhost:7400      (browse it in DevBrowser)
-  API          {API}      token: {TOKEN}
+  API          {API}
   dashboard    {"http://localhost:3002" if args.ui else "python sandbox/run.py up --ui"}
-  DevBrowser   Settings -> Integrations -> SentinelGraph: {API} + {TOKEN}
+  DevBrowser   Settings -> Integrations -> SentinelGraph: {API}
 
 try:  python sandbox/run.py break inventory   then   investigate   then   approve rollback
 Ctrl+C stops everything.""", flush=True)

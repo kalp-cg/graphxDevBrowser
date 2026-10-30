@@ -60,7 +60,7 @@ export const PROFILES: Profile[] = [
 ];
 
 /** Where the omnibox sends text that is not an address. */
-export const SEARCH_URL = 'https://duckduckgo.com/?q=';
+export const SEARCH_URL = 'https://www.google.com/search?q=';
 
 const LOCAL_HOST = /^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|[\w-]+\.(?:local|test|localhost)|(?:\d{1,3}\.){3}\d{1,3})(:\d+)?(\/.*)?$/i;
 
@@ -136,4 +136,20 @@ export const ZOOM_LEVELS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 
 export function stepZoom(current: number, direction: 1 | -1): number {
   if (direction > 0) return ZOOM_LEVELS.find(z => z > current + 0.001) ?? ZOOM_LEVELS[ZOOM_LEVELS.length - 1]!;
   return [...ZOOM_LEVELS].reverse().find(z => z < current - 0.001) ?? ZOOM_LEVELS[0]!;
+}
+
+/** The website of a page URL (`http://localhost:7400`), or '' for pages that are not on the web (new tab, about:blank). */
+export function siteOf(url: string | undefined): string {
+  try {
+    const u = new URL(url ?? '');
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.origin : '';
+  } catch {
+    return '';
+  }
+}
+
+/** What belongs to the page being viewed: items captured while that website was open. Nothing on a non-web page. */
+export function forSite<T extends { pageUrl?: string }>(items: T[], currentUrl: string): T[] {
+  const site = siteOf(currentUrl);
+  return site ? items.filter(i => siteOf(i.pageUrl) === site) : [];
 }

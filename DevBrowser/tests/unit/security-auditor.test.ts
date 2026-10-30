@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { PassiveSecurityAuditor } from '../../src/main/security/auditor';
+import { forSite, siteOf } from '../../src/shared/domain/browser';
 
 describe('PassiveSecurityAuditor', () => {
   let auditor: PassiveSecurityAuditor;
@@ -121,5 +122,31 @@ describe('PassiveSecurityAuditor', () => {
 
     auditor.clearFindings();
     expect(auditor.getFindings()).toHaveLength(0);
+  });
+
+  it('remembers which page a finding was found on, so a panel can show only the open website', () => {
+    const html = { 'content-type': 'text/html' };
+    const audit = (url: string, pageUrl: string) =>
+      auditor.evaluateResponse({ url, pageUrl, method: 'GET', statusCode: 200, requestHeaders: {}, responseHeaders: html });
+    audit('http://localhost:7400/', 'http://localhost:7400/');
+    audit('https://www.google.com/gen_204', 'https://www.google.com/search?q=x');
+    // The same resource embedded by two sites is a finding for each, not one that hides from the second.
+    audit('https://cdn.example.com/lib.js/', 'http://localhost:7400/');
+    audit('https://cdn.example.com/lib.js/', 'https://www.google.com/search?q=x');
+    const all = auditor.getFindings().filter(f => f.ruleId === 'SEC-HDR-001');
+    expect(all).toHaveLength(4);
+    expect(forSite(all, 'http://localhost:7400/cart').map(f => f.evidence.url).sort())
+      .toEqual(['http://localhost:7400/', 'https://cdn.example.com/lib.js/']);
+    expect(forSite(all, 'https://www.google.com/').length).toBe(2);
+    expect(forSite(all, 'about:blank')).toEqual([]);
+    expect(forSite(all, 'http://localhost:9999/')).toEqual([]);
+  });
+
+  it('treats ports and schemes as different websites', () => {
+    expect(siteOf('http://localhost:7400/a?b#c')).toBe('http://localhost:7400');
+    expect(siteOf('https://example.com')).toBe('https://example.com');
+    expect(siteOf('http://localhost:7401/')).not.toBe(siteOf('http://localhost:7400/'));
+    expect(siteOf('about:blank')).toBe('');
+    expect(siteOf(undefined)).toBe('');
   });
 });

@@ -50,7 +50,7 @@ async function go(text: string) {
 /** The window as Electron composites it. (Playwright's own screenshot can show a stale frame for a resized <webview>.) */
 async function shot(name: string) {
   if (!SHOTS) return;
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(1500);
   const png = await app.evaluate(async ({ BrowserWindow }) =>
     (await BrowserWindow.getAllWindows()[0]!.webContents.capturePage()).toPNG().toString("base64"));
   writeFileSync(path.join(SHOTS, `${name}.png`), Buffer.from(png, "base64"));
@@ -170,27 +170,59 @@ test("close a tab and reopen it", async () => {
   await expect(tabs()).toHaveCount(before);
 });
 
+test("Security and Network show only the open website; History keeps the earlier ones", async () => {
+  await go(SHOP);
+  await expect.poll(() => inPage<string>("document.querySelectorAll('.card').length")).toBe(3);
+  await page.getByRole("button", { name: "Security", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Security panel" });
+  const shopFinding = panel.getByText("http://localhost:7400/", { exact: true });
+  await expect(shopFinding.first()).toBeVisible();
+  await expect(panel.getByText(/found on /)).toHaveCount(0); // "This site" does not label where findings came from
+
+  // A different website: the shop's findings are not shown against it.
+  await go("http://localhost:8200/");
+  await expect(panel.getByText("http://localhost:8200/", { exact: true }).first()).toBeVisible();
+  await expect(shopFinding).toHaveCount(0);
+  await shot("10-security-this-site");
+
+  // History keeps everything, labelled with the page each finding came from.
+  await panel.getByRole("button", { name: /^History/ }).click();
+  await expect(panel.getByText("found on localhost:7400").first()).toBeVisible();
+  await expect(panel.getByText("found on localhost:8200").first()).toBeVisible();
+  await expect(shopFinding.first()).toBeVisible();
+  await shot("11-security-history");
+
+  // Network follows the same rule.
+  await page.getByRole("button", { name: "Network", exact: true }).click();
+  const network = page.getByRole("region", { name: "Network panel" });
+  await expect(network.getByRole("button", { name: /^History/ })).toHaveAttribute("aria-pressed", "false");
+  await expect(network.getByText(/localhost:7400\/api\/products/)).toHaveCount(0);
+  await network.getByRole("button", { name: /^History/ }).click();
+  await expect(network.getByText(/localhost:7400/).first()).toBeVisible();
+  await page.getByRole("button", { name: "Close panel" }).click();
+  await go(SHOP);
+});
+
 test("Dependencies shows the live SentinelGraph; an investigation and a fix from inside the browser", async () => {
   // A clean incident state: the shop healthy, earlier proposals expired (learned memory is kept).
   await fetch(CONTROL, { method: "POST", body: JSON.stringify({ action: "reset" }) });
-  const reset = await fetch(`${API}/api/reset?keep_memory=true`, { method: "POST", headers: { "X-Admin-Token": "sandbox-token" } });
+  const reset = await fetch(`${API}/api/reset?keep_memory=true`, { method: "POST" });
   expect(reset.ok).toBe(true);
   await page.getByRole("button", { name: /^Settings/ }).click();
   await page.getByRole("button", { name: "Integrations" }).click();
   await page.getByPlaceholder("http://localhost:8100").fill(API);
-  await page.getByPlaceholder("X-Admin-Token").fill("sandbox-token");
   await page.getByRole("button", { name: "Connect & Load Graph" }).click();
   await expect(page.getByRole("contentinfo").getByText("SentinelGraph connected")).toBeVisible();
 
   await page.getByRole("button", { name: "Dependencies (SentinelGraph)" }).click();
-  await expect(page.getByText("7 services")).toBeVisible();
+  await expect(page.getByText("7 services", { exact: true })).toBeVisible();
   await expect(page.locator("canvas").first()).toBeVisible();
   await shot("07-dependencies");
 
   await fetch(CONTROL, { method: "POST", body: JSON.stringify({ action: "fault", service: "inventory", rate: 0.7,
     deploy: { version: "v2.4.1", message: "Reduce orders-db pool size to 2", author: "Priya Shah" } }) });
   await expect(page.getByText(/\d+ unhealthy/)).toBeVisible({ timeout: 30_000 });
-  const panel = page.getByRole("region", { name: "Dependencies panel" });
+  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
   await panel.getByRole("button", { name: "Investigate", exact: true }).click();
   await expect(panel.getByText("Root cause:")).toBeVisible({ timeout: 60_000 });
   await expect(panel.locator("strong", { hasText: /^inventory$/ })).toBeVisible();
@@ -198,6 +230,63 @@ test("Dependencies shows the live SentinelGraph; an investigation and a fix from
   await panel.getByRole("group", { name: "rollback on inventory" }).getByRole("button", { name: "Approve" }).click();
   await expect(panel.getByText(/rolled back v2\.4\.1 on inventory/)).toBeVisible();
   await expect.poll(async () => (await (await fetch(CONTROL)).json()).faults).toEqual({});
+});
+
+test("Connect codebase maps a repository into the graph from the SentinelGraph panel", async () => {
+  // The native folder dialog cannot be driven; answer it with a repository.
+  const repo = process.env.DEVBROWSER_REPO ?? path.resolve(__dirname, "../../sandbox/shop");
+  await app.evaluate(({ dialog }, folder) => {
+    dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [folder] })) as unknown as typeof dialog.showOpenDialog;
+  }, repo);
+  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
+  await expect(panel).toBeVisible();
+  await panel.getByRole("button", { name: "Connect codebase" }).click();
+  await expect(page.getByText(/^Mapped /)).toBeVisible();
+  await expect(page.getByText(/\d+ services, \d+ databases, \d+ dependencies/)).toBeVisible();
+});
+
+test("a narrow window gives the panel the whole area and keeps the toolbar usable", async () => {
+  await page.setViewportSize({ width: 700, height: 800 });
+  await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeLessThan(900);
+  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
+  await expect(panel).toBeVisible();
+  expect((await panel.boundingBox())!.width).toBeGreaterThan(560);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await shot("09-narrow");
+  await page.setViewportSize({ width: 1440, height: 900 });
+});
+
+test("demo: break a service from the graph, investigate it, restore the healthy system", async () => {
+  const reset = await fetch(`${API}/api/reset?keep_memory=true`, { method: "POST" });
+  expect(reset.ok).toBe(true);
+  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
+  if (!(await panel.isVisible())) await page.getByRole("button", { name: "Dependencies (SentinelGraph)" }).click();
+  await expect(panel.getByText("all healthy")).toBeVisible({ timeout: 20_000 });
+
+  // Healthy system: Investigate says there is nothing to investigate (not a cut-off line).
+  await panel.getByRole("button", { name: "Investigate", exact: true }).click();
+  await expect(panel.getByText(/nothing to investigate/)).toBeVisible({ timeout: 30_000 });
+
+  // Find a service, break it with the same three choices as the dashboard.
+  await panel.getByRole("combobox", { name: "Find a service" }).fill("inventory");
+  await expect(panel.getByText("Simulate a failure")).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Ship a bad deploy" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Degrade it" })).toBeVisible();
+  await panel.getByRole("button", { name: "Crash it" }).click();
+  await expect(panel.getByText(/\d+ unhealthy/)).toBeVisible({ timeout: 20_000 });
+  await expect(panel.getByRole("button", { name: "Restore healthy" })).toBeVisible();
+
+  // The same workflow as before: investigate, root cause, proposed fix awaiting approval.
+  await panel.getByRole("button", { name: "Investigate", exact: true }).click();
+  await expect(panel.getByText("Root cause:")).toBeVisible({ timeout: 60_000 });
+  await expect(panel.locator("strong", { hasText: /^inventory$/ })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Approve" }).first()).toBeVisible();
+  await shot("12-demo-broken");
+
+  await panel.getByRole("button", { name: "Restore healthy" }).click();
+  await expect(panel.getByText("all healthy")).toBeVisible({ timeout: 20_000 });
+  await expect(panel.getByText("Root cause:")).toHaveCount(0); // the finished investigation is cleared
+  await shot("13-demo-restored");
 });
 
 test("relaunching restores the tabs and the SentinelGraph connection", async () => {

@@ -10,8 +10,7 @@ import {
 } from '../../src/shared/domain/sentinel';
 import {
   SentinelGraphClient,
-  type SavedConnection,
-  type SecretStore
+  type SavedConnection
 } from '../../src/main/integrations/sentinel-client';
 import type { NetworkTransaction } from '../../src/shared/domain/network';
 
@@ -106,11 +105,6 @@ describe('SentinelGraph graph mapping', () => {
 });
 
 describe('SentinelGraphClient', () => {
-  const vault: SecretStore = {
-    encryptSecret: s => Buffer.from(s).toString('base64'),
-    decryptSecret: s => Buffer.from(s, 'base64').toString()
-  };
-
   function fakeFetch(responses: Array<{ status: number; body: unknown }>) {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const impl = (async (url: string, init: RequestInit) => {
@@ -121,22 +115,52 @@ describe('SentinelGraphClient', () => {
     return { impl, calls };
   }
 
-  it('keeps the token encrypted and signs requests with it', async () => {
+  it('sends no credentials', async () => {
     const { impl, calls } = fakeFetch([{ status: 200, body: { tigergraph: { ok: true, services: 38 }, graph: 'Sentinel' } }]);
-    const client = new SentinelGraphClient(vault, impl);
-    client.configure('http://localhost:8100/', 'admin-123');
+    const client = new SentinelGraphClient(impl);
+    client.configure('http://localhost:8100/');
     const status = await client.status();
     client.dispose();
     expect(status).toMatchObject({ ok: true, graph: 'Sentinel', services: 38 });
     expect(calls[0]!.url).toBe('http://localhost:8100/api/health');
-    expect((calls[0]!.init.headers as Record<string, string>)['X-Admin-Token']).toBe('admin-123');
-    expect(JSON.stringify(client)).not.toContain('admin-123');
+    expect(Object.keys(calls[0]!.init.headers as Record<string, string>).map(h => h.toLowerCase())).toEqual(['accept']);
+  });
+
+  it('sends the chosen folder to the API to map the codebase', async () => {
+    const result = { repo: 'shop', source: 'docker-compose', services: 7, databases: 2, dependencies: 9, teams: 4,
+      changes: 3, aliases: 20, service_names: ['web'] };
+    const { impl, calls } = fakeFetch([{ status: 200, body: result }, { status: 422, body: { detail: 'not a directory' } }]);
+    const client = new SentinelGraphClient(impl);
+    client.configure('http://localhost:8100');
+    expect(await client.scanCodebase('/work/shop')).toEqual(result);
+    expect(calls[0]!.url).toBe('http://localhost:8100/api/workspace/scan');
+    expect(JSON.parse(calls[0]!.init.body as string)).toEqual({ path: '/work/shop' });
+    await expect(client.scanCodebase('/nope')).rejects.toThrow(/HTTP 422.*not a directory/);
+    client.dispose();
+  });
+
+  it('breaks a service the way the dashboard does, and restores a healthy system', async () => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: { target: 'payment', alerting_services: ['checkout'], title: 'x' } },
+      { status: 200, body: {} }, { status: 200, body: {} }, { status: 200, body: {} }]);
+    const client = new SentinelGraphClient(impl);
+    client.configure('http://localhost:8100');
+    expect((await client.breakService('payment', 'deploy')).alerting_services).toEqual(['checkout']);
+    await client.breakService('payment', 'crash');
+    await client.breakService('pay ment', 'degrade');
+    await client.restoreHealthy();
+    client.dispose();
+    expect(calls.map(c => `${c.init.method} ${c.url.replace('http://localhost:8100', '')}`)).toEqual([
+      'POST /api/chaos/payment?mode=down&deploy=true',
+      'POST /api/chaos/payment?mode=down&deploy=false',
+      'POST /api/chaos/pay%20ment?mode=degraded&deploy=false',
+      'POST /api/reset?keep_memory=true'
+    ]);
   });
 
   it('batches traffic and keeps a failed batch for the next try', async () => {
     const { impl, calls } = fakeFetch([{ status: 503, body: {} }, { status: 200, body: {} }]);
-    const client = new SentinelGraphClient(vault, impl);
-    client.configure('http://localhost:8100', 't');
+    const client = new SentinelGraphClient(impl);
+    client.configure('http://localhost:8100');
     const rec = { pageUrl: 'http://localhost:3000/', url: 'http://api.local/x', method: 'GET', startTime: 1 };
     client.record(rec);
     client.record(rec);
@@ -150,28 +174,25 @@ describe('SentinelGraphClient', () => {
   });
 
   it('reports a clear status when not configured or unreachable', async () => {
-    const unconfigured = new SentinelGraphClient(vault, fakeFetch([]).impl);
+    const unconfigured = new SentinelGraphClient(fakeFetch([]).impl);
     expect((await unconfigured.status()).ok).toBe(false);
-    const { impl } = fakeFetch([{ status: 401, body: { detail: 'missing or invalid X-Admin-Token' } }]);
-    const client = new SentinelGraphClient(vault, impl);
-    client.configure('http://localhost:8100', 'wrong');
+    const { impl } = fakeFetch([{ status: 503, body: { detail: 'graph unavailable' } }]);
+    const client = new SentinelGraphClient(impl);
+    client.configure('http://localhost:8100');
     const status = await client.status();
     client.dispose();
     expect(status.ok).toBe(false);
-    expect(status.message).toContain('HTTP 401');
+    expect(status.message).toContain('HTTP 503');
   });
 
-  it('starts an investigation and preserves token on auto-connect configure', async () => {
+  it('starts an investigation', async () => {
     const { impl, calls } = fakeFetch([{ status: 200, body: { run_id: 'run-test-42' } }]);
-    const client = new SentinelGraphClient(vault, impl);
-    client.configure('http://localhost:8100', 'admin-token');
-    // Reconfigure without token (auto-connect simulation)
-    client.configure('http://localhost:8100', '');
+    const client = new SentinelGraphClient(impl);
+    client.configure('http://localhost:8100');
     const res = await client.startInvestigation('Investigate checkout failure');
     client.dispose();
     expect(res.run_id).toBe('run-test-42');
     expect(calls[0]!.url).toBe('http://localhost:8100/api/runs');
-    expect((calls[0]!.init.headers as Record<string, string>)['X-Admin-Token']).toBe('admin-token');
   });
 });
 
@@ -188,6 +209,24 @@ describe('Investigate this failure', () => {
     expect(toEvidence(tx(undefined), 'about:blank')).toMatchObject({ status_code: 0, page_url: '' }); // no response
     expect(toEvidence(tx(404), 'http://localhost:7400/')).toBeNull();
     expect(toEvidence(tx(200), 'http://localhost:7400/')).toBeNull();
+  });
+
+  it('lights up the incident on the graph, not the ranking of the most critical services', () => {
+    const tool = (name: string, nodes: string[], edges: string[] = []) =>
+      ({ type: 'tool_result', run_id: 'r2', name, node_uids: nodes, edge_uids: edges });
+    const events = [
+      tool('find_common_cause', ['svc:checkout', 'svc:payment'], ['e:checkout->payment']),
+      tool('blast_radius', ['svc:payment', 'svc:checkout', 'svc:frontend']),
+      tool('critical_services', ['svc:product-catalog', 'svc:telemetry-docs', 'svc:currency']),
+      { type: 'final', run_id: 'r2', root_cause: 'payment', report: 'x', seconds: 1 }
+    ];
+    const run = summarizeRun({ run_id: 'r2', running: false, events });
+    expect(run.path.nodes.sort()).toEqual(['svc:checkout', 'svc:frontend', 'svc:payment']);
+    expect(run.path.edges).toEqual(['e:checkout->payment']);
+    expect(run.steps.map(s => s.name)).toContain('critical_services'); // still shown in the trail
+    // While running, the step being run is highlighted only when it is evidence.
+    const live = summarizeRun({ run_id: 'r2', running: true, events: events.slice(0, 3) });
+    expect(live.path.currentNodes).toEqual([]);
   });
 
   it('summarizes a run as it streams in', () => {
@@ -211,10 +250,6 @@ describe('Investigate this failure', () => {
 });
 
 describe('SentinelGraphClient integration surface', () => {
-  const vault: SecretStore = {
-    encryptSecret: s => `enc:${s}`,
-    decryptSecret: s => s.replace(/^enc:/, '')
-  };
   const fetchJson = (bodies: unknown[]) => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const impl = (async (url: string, init: RequestInit) => {
@@ -224,21 +259,21 @@ describe('SentinelGraphClient integration surface', () => {
     return { impl, calls };
   };
 
-  it('saves the connection encrypted and restores it on the next launch', async () => {
+  it('saves the connection and restores it on the next launch', async () => {
     let saved: SavedConnection | null = null;
     const store = { load: () => saved, save: (c: SavedConnection) => { saved = c; } };
-    const first = new SentinelGraphClient(vault, fetchJson([]).impl, store);
+    const first = new SentinelGraphClient(fetchJson([]).impl, store);
     expect(first.restore()).toBe(false);
-    first.configure('http://localhost:8200/', 'sandbox-token');
+    first.configure('http://localhost:8200/');
     first.dispose();
-    expect(saved).toEqual({ baseUrl: 'http://localhost:8200', encryptedToken: 'enc:sandbox-token' });
+    expect(saved).toEqual({ baseUrl: 'http://localhost:8200' });
 
     const { impl, calls } = fetchJson([{ run_id: 'r9' }]);
-    const next = new SentinelGraphClient(vault, impl, store);
+    const next = new SentinelGraphClient(impl, store);
     expect(next.restore()).toBe(true);
     await next.startInvestigation(undefined, [{ url: 'http://x/a', method: 'GET', status_code: 503, page_url: '' }]);
     next.dispose();
-    expect((calls[0]!.init.headers as Record<string, string>)['X-Admin-Token']).toBe('sandbox-token');
+    expect(calls[0]!.url).toBe('http://localhost:8200/api/runs');
     expect(JSON.parse(calls[0]!.init.body as string).evidence).toHaveLength(1);
   });
 
@@ -250,8 +285,8 @@ describe('SentinelGraphClient integration surface', () => {
       if (fail) { fail = false; return new Response('down', { status: 503 }); }
       return new Response(JSON.stringify({ service: 'checkout', known: true }), { status: 200 });
     }) as unknown as typeof fetch;
-    const client = new SentinelGraphClient(vault, impl);
-    client.configure('http://localhost:8200', 't');
+    const client = new SentinelGraphClient(impl);
+    client.configure('http://localhost:8200');
     await expect(client.resolve('http://localhost:7404/a')).rejects.toThrow('HTTP 503');
     expect((await client.resolve('http://localhost:7404/a')).service).toBe('checkout');
     expect((await client.resolve('http://localhost:7404/b?x=1')).service).toBe('checkout'); // same host: cached
@@ -265,8 +300,8 @@ describe('SentinelGraphClient integration surface', () => {
 
   it('approves and rejects actions by uid', async () => {
     const { impl, calls } = fetchJson([{ outcome: 'rolled back' }, { status: 'rejected' }, { run_id: 'r', events: [] }]);
-    const client = new SentinelGraphClient(vault, impl);
-    client.configure('http://localhost:8200', 't');
+    const client = new SentinelGraphClient(impl);
+    client.configure('http://localhost:8200');
     expect((await client.approveAction('act:ab12')).outcome).toBe('rolled back');
     await client.rejectAction('act:cd34');
     await client.currentRun();

@@ -27,7 +27,7 @@ def main() -> None:
     cb = sub.add_parser("codebase", help="services, dependencies, owners, addresses and git changes of a repository")
     cb.add_argument("path", type=Path, help="the repository root")
     cb.add_argument("--since", default="30 days ago")
-    cb.add_argument("--push", metavar="URL", help="send the scan to a running API (ADMIN_TOKEN from the env) "
+    cb.add_argument("--push", metavar="URL", help="send the scan to a running API "
                                                   "instead of writing the graph directly")
     cb.add_argument("--dry-run", action="store_true", help="print the manifest, write nothing")
     args = parser.parse_args()
@@ -75,11 +75,10 @@ def main() -> None:
 
 
 def _push(url: str, manifest: dict) -> dict:
-    import os
     import urllib.request
 
     req = urllib.request.Request(f"{url.rstrip('/')}/api/workspace", json.dumps(manifest).encode(),
-                                 {"Content-Type": "application/json", "X-Admin-Token": os.getenv("ADMIN_TOKEN", "")})
+                                 {"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.loads(r.read())
 

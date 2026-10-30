@@ -12,7 +12,7 @@ backend/.venv/bin/python sandbox/run.py up          # add --ui for the web dashb
 | What | Where |
 | :--- | :--- |
 | Storefront (browse it in DevBrowser) | http://localhost:7400 |
-| SentinelGraph API | http://localhost:8200, admin token `sandbox-token` |
+| SentinelGraph API | http://localhost:8200 |
 | Shop control (faults, rollback) | http://localhost:7499/__control |
 | Dashboard (`up --ui`) | http://localhost:3002 |
 
@@ -46,8 +46,8 @@ recognised as a repeat.
 ## With DevBrowser
 
 1. `cd DevBrowser && npm run dev`
-2. Settings → Integrations → SentinelGraph: `http://localhost:8200`, token `sandbox-token`. The connection is
-   saved (token keychain-encrypted) and restored on the next launch.
+2. Settings → Integrations → SentinelGraph: `http://localhost:8200`. The connection is
+   saved and restored on the next launch.
 3. Browse http://localhost:7400. Captured calls land on the scanned services (`web` → `gateway`), not on
    anonymous hosts. Passive browsing only shapes the graph; it never changes health or fires alerts.
 4. `python sandbox/run.py break inventory`, then click **Checkout** in the storefront.
@@ -61,7 +61,7 @@ recognised as a repeat.
 ```bash
 python sandbox/run.py demo inventory     # 8 checks: baseline, alerts, root cause, rollback proposed, executed,
                                          # shop healthy, stays healthy, incident remembered
-cd DevBrowser && SENTINEL_SANDBOX=1 SENTINEL_URL=http://localhost:8200 SENTINEL_ADMIN_TOKEN=sandbox-token \
+cd DevBrowser && SENTINEL_SANDBOX=1 SENTINEL_URL=http://localhost:8200 \
   npx vitest run tests/unit/sandbox-live.test.ts tests/unit/sentinel-live.test.ts
 ```
 
@@ -75,3 +75,24 @@ faults). Each service is a short `services/<name>/app.py`; `run_shop.py` runs th
 `docker compose up`). Faults originate in a service's own database
 call (or its handler, if it has no database) and travel up as 5xx, so the error spans are attributed the way
 they would be in production.
+
+## Connect your own codebase (or an open-source one)
+
+In DevBrowser: Settings → connect to the API (`http://localhost:8200`), then **Connect codebase…**
+(also in the SentinelGraph panel) and pick a repository folder. Services, databases, owners and dependencies appear in
+the graph. The API must run on the same machine as the folder; for a remote API use
+`python -m sentinel.ingest codebase PATH --push URL`.
+
+What it reads: `docker-compose.yml` (`depends_on`, `links`, service URLs in `environment`), CODEOWNERS, `sentinel.*`
+labels and `git log`. Good open-source repos to try, as they ship a compose file with many services:
+`open-telemetry/opentelemetry-demo`, `GoogleCloudPlatform/microservices-demo` (Kubernetes manifests only: no compose, so
+services come from directories), and `microservices-patterns/ftgo-application`. Real runtime calls come from traces
+(`POST /v1/traces`) and from browsing the running app in DevBrowser.
+
+## Demo flow from DevBrowser (healthy, then broken)
+
+SentinelGraph panel → type a service in **Find a service** (or click it) → under **Simulate a failure** choose
+**Ship a bad deploy**, **Crash it** or **Degrade it**. On the sandbox this breaks the running shop for real, and the
+API waits until the failing traces have become alerts, so **Investigate** finds the incident straight away. Then
+approve the proposed fix (the shop really heals) or press **Restore healthy**. Investigating a healthy system
+answers "All clear". On a repo scanned without a running system the failure is simulated in the graph only.

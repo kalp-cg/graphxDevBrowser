@@ -2,6 +2,7 @@ import React from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { useBrowserStore } from '../../store/useBrowserStore';
+import { forSite } from '../../../shared/domain/browser';
 
 const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 
@@ -17,7 +18,8 @@ export const StatusBar: React.FC = () => {
   const sentinelUrl = useAppStore(s => s.sentinelUrl);
   const ollama = useAppStore(s => s.ollamaStatus);
   const metrics = useAppStore(s => s.hardwareMetrics);
-  const requests = useAppStore(s => s.transactions.length);
+  const currentUrl = useAppStore(s => s.currentUrl);
+  const requests = useAppStore(s => forSite(s.transactions, currentUrl).length);
   const theme = useAppStore(s => s.theme);
   const toggleTheme = useAppStore(s => s.toggleTheme);
   const setActiveView = useAppStore(s => s.setActiveView);

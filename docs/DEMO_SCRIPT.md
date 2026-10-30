@@ -7,13 +7,10 @@
 ## Before You Hit Record
 
 ```bash
-# Reset with memory preserved from a previous run (write routes need the admin token)
-curl -X POST -H "X-Admin-Token: $ADMIN_TOKEN" \
-  "https://sentinelgraph-api-relh.onrender.com/api/reset?keep_memory=true"
+# Reset with memory preserved from a previous run
+curl -X POST   "https://sentinelgraph-api-relh.onrender.com/api/reset?keep_memory=true"
 ```
 
-- Click one write action in the UI once before recording: it asks for the admin token and remembers it, so the
-  prompt never appears on camera.
 
 - Browser fullscreen, zoom 100%, no bookmarks bar
 - Use headphones mic or a quiet room

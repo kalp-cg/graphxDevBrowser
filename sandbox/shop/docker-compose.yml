@@ -4,7 +4,6 @@
 x-service: &service
   environment: &env
     SENTINEL_URL: http://host.docker.internal:8200
-    ADMIN_TOKEN: ${ADMIN_TOKEN:-sandbox-token}
   command: python app.py
 
 services:

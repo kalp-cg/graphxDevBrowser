@@ -53,6 +53,8 @@ def summarize(name: str, res: dict) -> str:
     r = res.get("result")
     try:
         if name == "get_active_alerts":
+            if not r:
+                return "no alerts firing"
             return f"{len(r)} alerts firing on " + ", ".join(sorted({a['service'] for a in r}))
         if name == "find_common_cause":
             c = r["candidates"]

@@ -8,13 +8,18 @@ import {
   Copy 
 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
-import { Badge } from '../common/Badge';
 import { ResizableHandle } from '../common/ResizableHandle';
 import { InvestigationPanel, ServiceContextCard } from '../common/SentinelPanels';
 import { EmptyState } from '../common/EmptyState';
+import { SiteScope } from '../common/SiteScope';
+import { forSite, siteOf } from '../../../shared/domain/browser';
 
 export const NetworkView: React.FC = () => {
-  const transactions = useAppStore(s => s.transactions);
+  const allTransactions = useAppStore(s => s.transactions);
+  const currentUrl = useAppStore(s => s.currentUrl);
+  const history = useAppStore(s => s.networkHistory);
+  const setHistory = useAppStore(s => s.setNetworkHistory);
+  const transactions = history ? allTransactions : forSite(allTransactions, currentUrl);
   const selectedTransactionId = useAppStore(s => s.selectedTransactionId);
   const setSelectedTransactionId = useAppStore(s => s.setSelectedTransactionId);
   const networkSearchQuery = useAppStore(s => s.networkSearchQuery);
@@ -132,7 +137,7 @@ export const NetworkView: React.FC = () => {
             ))}
           </div>
 
-          <Badge label="CDP Capture Active" variant="success" />
+          <SiteScope history={history} onChange={setHistory} currentUrl={currentUrl} site={siteOf(currentUrl)} total={allTransactions.length} />
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -164,8 +169,9 @@ export const NetworkView: React.FC = () => {
         {filteredTransactions.length === 0 ? (
           <EmptyState
             icon={<Network size={32} />}
-            title="No Network Transactions Captured"
-            description="Dev Browser's CDP interceptor is monitoring traffic. Navigate in the browser or trigger an API call to inspect traffic."
+            title={history ? 'No requests in the history' : siteOf(currentUrl) ? 'No requests for this site yet' : 'No page open'}
+            description={siteOf(currentUrl) || history ? "Dev Browser's CDP interceptor is monitoring traffic. Navigate in the browser or trigger an API call to inspect traffic. Use History for earlier sites."
+              : 'Open a page to see its network traffic. Use History for sites you visited earlier.'}
             actionLabel="Reset Filters"
             onAction={() => { setNetworkSearchQuery(''); setNetworkFilter('all'); }}
           />

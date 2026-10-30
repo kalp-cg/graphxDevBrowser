@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { ADMIN, API, approveAll, hardReset, investigate, openApp, stepCount } from "./helpers";
+import { API, approveAll, hardReset, investigate, openApp, stepCount } from "./helpers";
 
 test.beforeEach(async ({ request }) => hardReset(request));
 
@@ -105,8 +105,8 @@ test("only one investigation at a time", async ({ page, request }) => {
   await openApp(page);
   await page.getByTestId("scenario-db-pool-exhaustion").click();
   await expect(page.getByTestId("alerts")).toBeVisible();
-  const a = await request.post(`${API}/api/runs`, { data: { provider: "autopilot" }, headers: ADMIN });
-  const b = await request.post(`${API}/api/runs`, { data: { provider: "autopilot" }, headers: ADMIN });
+  const a = await request.post(`${API}/api/runs`, { data: { provider: "autopilot" } });
+  const b = await request.post(`${API}/api/runs`, { data: { provider: "autopilot" } });
   expect(a.status()).toBe(200);
   expect(b.status()).toBe(409);
   await expect(page.getByTestId("report")).toBeVisible({ timeout: 90_000 });

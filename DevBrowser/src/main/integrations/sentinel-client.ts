@@ -1,6 +1,9 @@
 import type {
   BrowserTrafficRecord,
   InvestigationEvidence,
+  ChaosKind,
+  ChaosResult,
+  CodebaseScanResult,
   SentinelAction,
   SentinelBlastRadius,
   SentinelResolution,
@@ -9,13 +12,7 @@ import type {
   SentinelStatus
 } from '../../shared/domain/sentinel';
 
-/** The parts of CredentialVault this client needs (so tests can pass a stand-in). */
-export interface SecretStore {
-  encryptSecret(plaintext: string): string;
-  decryptSecret(ciphertext: string): string;
-}
-
-/** Where the connection is kept between launches. The token is stored only in its encrypted form. */
+/** Where the connection is kept between launches. */
 export interface ConnectionStore {
   load(): SavedConnection | null;
   save(conn: SavedConnection): void;
@@ -23,7 +20,6 @@ export interface ConnectionStore {
 
 export interface SavedConnection {
   baseUrl: string;
-  encryptedToken: string;
 }
 
 const FLUSH_INTERVAL_MS = 5000;
@@ -31,29 +27,23 @@ const MAX_BUFFER = 500;
 const RESOLVE_TTL_MS = 30_000;
 
 /**
- * Talks to a SentinelGraph API from the main process. The admin token never reaches the renderer: it is
- * encrypted with the OS keychain (safeStorage) on configure and decrypted only to sign a request.
+ * Talks to a SentinelGraph API from the main process.
  * Captured traffic is buffered and sent in batches, so browsing never waits on the graph.
  */
 export class SentinelGraphClient {
   private baseUrl = '';
-  private encryptedToken = '';
   private buffer: BrowserTrafficRecord[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
   private resolved = new Map<string, { at: number; value: Promise<SentinelResolution> }>();
 
   constructor(
-    private readonly vault: SecretStore,
     private readonly fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
     private readonly store: ConnectionStore | null = null
   ) {}
 
-  public configure(baseUrl: string, adminToken: string): void {
+  public configure(baseUrl: string): void {
     this.baseUrl = baseUrl.trim().replace(/\/+$/, '');
-    if (adminToken) {
-      this.encryptedToken = this.vault.encryptSecret(adminToken);
-    }
-    this.store?.save({ baseUrl: this.baseUrl, encryptedToken: this.encryptedToken });
+    this.store?.save({ baseUrl: this.baseUrl });
     this.start();
   }
 
@@ -62,7 +52,6 @@ export class SentinelGraphClient {
     const saved = this.store?.load();
     if (!saved?.baseUrl) return false;
     this.baseUrl = saved.baseUrl;
-    this.encryptedToken = saved.encryptedToken;
     this.start();
     return true;
   }
@@ -130,6 +119,23 @@ export class SentinelGraphClient {
     return value;
   }
 
+  /** Map a repository on the API's machine into the graph: services, dependencies, owners, addresses. */
+  public scanCodebase(path: string): Promise<CodebaseScanResult> {
+    this.resolved.clear(); // new addresses change what a URL resolves to
+    return this.request('POST', '/api/workspace/scan', { path });
+  }
+
+  /** Simulate a failure in the graph (nothing real is touched): the service goes down or degraded and its callers alert. */
+  public breakService(service: string, kind: ChaosKind): Promise<ChaosResult> {
+    const mode = kind === 'degrade' ? 'degraded' : 'down';
+    return this.request('POST', `/api/chaos/${encodeURIComponent(service)}?mode=${mode}&deploy=${kind === 'deploy'}`);
+  }
+
+  /** Back to a healthy system; what the agent has learned is kept. */
+  public restoreHealthy(): Promise<unknown> {
+    return this.request('POST', '/api/reset?keep_memory=true');
+  }
+
   public currentRun(): Promise<SentinelRun> {
     return this.request('GET', '/api/runs/current');
   }
@@ -172,8 +178,6 @@ export class SentinelGraphClient {
   private async request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
     if (!this.isConfigured()) throw new Error('SentinelGraph API URL is not set');
     const headers: Record<string, string> = { Accept: 'application/json' };
-    const token = this.vault.decryptSecret(this.encryptedToken);
-    if (token) headers['X-Admin-Token'] = token;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method,
