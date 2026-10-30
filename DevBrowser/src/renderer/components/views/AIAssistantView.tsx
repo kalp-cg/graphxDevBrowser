@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   Bot, 
   Send, 
-  Sparkles, 
+  Loader2, 
   Copy, 
   Check, 
   ShieldCheck, 
@@ -187,7 +187,7 @@ export const AIAssistantView: React.FC = () => {
 
         {isAiGenerating && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '12px' }}>
-            <Sparkles size={14} className="animate-spin" color="var(--accent-emerald)" />
+            <Loader2 size={14} className="animate-spin" color="var(--accent)" />
             <span>Local model reasoning over local unified memory...</span>
           </div>
         )}
@@ -219,7 +219,7 @@ export const AIAssistantView: React.FC = () => {
               cursor: 'pointer',
               whiteSpace: 'nowrap'
             }}
-            className="transition-smooth hover:text-cyan-400"
+            className="transition-smooth"
           >
             {qp}
           </button>

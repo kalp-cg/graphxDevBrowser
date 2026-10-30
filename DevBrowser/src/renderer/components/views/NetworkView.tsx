@@ -151,7 +151,7 @@ export const NetworkView: React.FC = () => {
               padding: '4px 8px',
               borderRadius: '4px'
             }}
-            className="transition-smooth hover:bg-slate-800"
+            className="transition-smooth"
           >
             <Trash2 size={13} />
             Clear
@@ -202,7 +202,7 @@ export const NetworkView: React.FC = () => {
                       background: isSelected ? 'var(--bg-active)' : 'transparent',
                       cursor: 'pointer'
                     }}
-                    className="transition-smooth hover:bg-slate-800"
+                    className="transition-smooth"
                   >
                     <td style={{
                       padding: '6px 10px',

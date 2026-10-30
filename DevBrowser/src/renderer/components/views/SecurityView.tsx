@@ -102,7 +102,7 @@ export const SecurityView: React.FC = () => {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <ShieldAlert size={16} color="#ef4444" />
+              <ShieldAlert size={16} color="var(--danger)" />
               <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
                 Passive Security Findings
               </span>
@@ -152,12 +152,12 @@ export const SecurityView: React.FC = () => {
                     onClick={() => setSelectedFindingId(f.id)}
                     style={{
                       background: isSelected ? 'var(--bg-active)' : 'var(--bg-surface)',
-                      borderLeft: `4px solid ${f.severity === 'HIGH' ? '#ef4444' : 'var(--accent-amber)'}`,
+                      borderLeft: `4px solid ${f.severity === 'HIGH' ? 'var(--danger)' : 'var(--accent-amber)'}`,
                       borderRadius: '6px',
                       padding: '10px 12px',
                       cursor: 'pointer'
                     }}
-                    className="transition-smooth hover:bg-slate-800"
+                    className="transition-smooth"
                   >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
                       <Badge
@@ -203,7 +203,7 @@ export const SecurityView: React.FC = () => {
               fontWeight: 600,
               cursor: 'pointer'
             }}
-            className="transition-smooth hover:bg-slate-800"
+            className="transition-smooth"
           >
             <Download size={13} />
             Export Audit Report (SARIF v2.1.0)

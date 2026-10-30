@@ -17,19 +17,7 @@ const label: React.CSSProperties = { fontSize: '11px', fontWeight: 700, color: '
 const statusColor = (s?: string) =>
   s === 'down' ? 'var(--accent-rose)' : s === 'degraded' ? 'var(--accent-amber)' : 'var(--accent-emerald)';
 
-const button = (tone: 'danger' | 'ok' | 'plain'): React.CSSProperties => ({
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: '5px',
-  fontSize: '11px',
-  fontWeight: 700,
-  padding: '4px 10px',
-  borderRadius: '5px',
-  cursor: 'pointer',
-  border: '1px solid var(--border-subtle)',
-  background: tone === 'danger' ? 'rgba(239, 68, 68, 0.18)' : tone === 'ok' ? 'rgba(16, 185, 129, 0.18)' : 'var(--bg-tertiary)',
-  color: tone === 'danger' ? '#f87171' : tone === 'ok' ? '#34d399' : 'var(--text-secondary)'
-});
+const button = (tone: 'danger' | 'ok' | 'plain'): string => `btn${tone === 'danger' ? ' danger' : tone === 'ok' ? ' primary' : ''}`;
 
 /** What SentinelGraph knows about the service a captured request went to, and a way to investigate it. */
 export const ServiceContextCard: React.FC<{ tx: NetworkTransaction }> = ({ tx }) => {
@@ -84,7 +72,7 @@ export const ServiceContextCard: React.FC<{ tx: NetworkTransaction }> = ({ tx })
       {failed && (
         <div style={{ marginTop: '8px' }}>
           <button
-            style={button('danger')}
+            className={button('danger')}
             disabled={runPhase === 'running'}
             onClick={() => void startSentinelInvestigation(undefined, tx)}
             title="Start a SentinelGraph investigation with this failed request as evidence"
@@ -116,7 +104,8 @@ export const InvestigationPanel: React.FC = () => {
         {run.phase === 'running' ? <Loader2 size={12} className="animate-spin" /> : <ShieldAlert size={12} />}
         INVESTIGATION {run.phase === 'running' ? 'RUNNING' : run.phase === 'done' ? `DONE${run.seconds ? ` IN ${run.seconds}s` : ''}` : 'FAILED'}
       </div>
-      <ol style={{ margin: '0 0 8px', paddingLeft: '18px', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+      <ol style={{ margin: '0 0 8px', paddingLeft: '18px', fontSize: '12px', lineHeight: 1.45,
+        display: 'flex', flexDirection: 'column', gap: '3px' }}>
         {run.steps.map((s, i) => (
           <li key={i} style={{ color: s.error ? 'var(--accent-rose)' : undefined }}>
             <strong>{s.name}</strong> {s.summary}
@@ -130,22 +119,23 @@ export const InvestigationPanel: React.FC = () => {
       )}
       {run.phase === 'failed' && <div style={{ color: 'var(--accent-rose)' }}>{run.report}</div>}
       {run.proposed.map(a => (
-        <div key={a.uid} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0',
+        <div key={a.uid} role="group" aria-label={`${a.kind} on ${a.target}`}
+          style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px 0',
           borderTop: '1px solid var(--border-subtle)' }}>
-          <div style={{ flex: 1 }}>
+          <div style={{ minWidth: 0 }}>
             <strong>{a.kind}</strong> on {a.target} <span style={{ color: 'var(--text-muted)' }}>({a.risk} risk)</span>
             {a.reason && <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{a.reason}</div>}
             {a.outcome && <div style={{ fontSize: '11px' }}>{a.outcome}</div>}
           </div>
           {a.status === 'pending' ? (
-            <>
-              <button style={button('ok')} disabled={busy === a.uid} onClick={() => void act(a.uid, true)}>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button className={button('ok')} disabled={busy === a.uid} onClick={() => void act(a.uid, true)}>
                 <Check size={12} /> Approve
               </button>
-              <button style={button('plain')} disabled={busy === a.uid} onClick={() => void act(a.uid, false)}>
+              <button className={button('plain')} disabled={busy === a.uid} onClick={() => void act(a.uid, false)}>
                 <X size={12} /> Reject
               </button>
-            </>
+            </div>
           ) : (
             <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{a.status}</span>
           )}

@@ -16,15 +16,15 @@ export const Badge: React.FC<BadgeProps> = ({
   const getColors = () => {
     switch (variant) {
       case 'primary':
-        return { bg: 'rgba(6, 182, 212, 0.15)', text: 'var(--accent-cyan)', border: 'rgba(6, 182, 212, 0.3)' };
+        return { bg: 'var(--accent-soft)', text: 'var(--accent)', border: 'transparent' };
       case 'success':
-        return { bg: 'rgba(16, 185, 129, 0.15)', text: 'var(--accent-emerald)', border: 'rgba(16, 185, 129, 0.3)' };
+        return { bg: 'var(--accent-soft)', text: 'var(--accent)', border: 'transparent' };
       case 'warning':
-        return { bg: 'rgba(245, 158, 11, 0.15)', text: 'var(--accent-amber)', border: 'rgba(245, 158, 11, 0.3)' };
+        return { bg: 'var(--warn-soft)', text: 'var(--warn)', border: 'transparent' };
       case 'danger':
-        return { bg: 'rgba(239, 68, 68, 0.15)', text: '#ef4444', border: 'rgba(239, 68, 68, 0.3)' };
+        return { bg: 'var(--danger-soft)', text: 'var(--danger)', border: 'transparent' };
       case 'demo':
-        return { bg: 'rgba(168, 85, 247, 0.15)', text: '#c084fc', border: 'rgba(168, 85, 247, 0.35)' };
+        return { bg: 'var(--bg-tertiary)', text: 'var(--text-secondary)', border: 'var(--border-medium)' };
       case 'outline':
         return { bg: 'transparent', text: 'var(--text-secondary)', border: 'var(--border-medium)' };
       default:

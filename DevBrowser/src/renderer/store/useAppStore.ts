@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import type { BrowserTab, ProfilePartition } from '../../shared/domain/browser';
 import type { NetworkTransaction } from '../../shared/domain/network';
 import type { ApiRequestDraft, EnvironmentProfile, ApiCollection } from '../../shared/domain/api-client';
 import type { SecurityFinding } from '../../shared/domain/security';
@@ -10,9 +9,11 @@ import {
   toDevBrowserGraph,
   toEvidence,
   type RunSummary,
-  type SentinelResolution
+  type SentinelResolution,
+  type SentinelSnapshot
 } from '../../shared/domain/sentinel';
 import type { HardwareMetrics } from '../../shared/ipc-channels';
+import { useBrowserStore } from './useBrowserStore';
 
 export type NavigationView = 'browser' | 'network' | 'apiClient' | 'security' | 'dependencies' | 'ai' | 'settings';
 export type ThemeMode = 'dark' | 'light';
@@ -43,18 +44,14 @@ interface AppState {
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
 
-  // Tabs & Partitions
-  tabs: BrowserTab[];
-  activeTabId: string;
-  partitions: ProfilePartition[];
+  // The tool panel docked beside the page ('browser' = closed). Tabs live in useBrowserStore.
+  lastPanel: NavigationView;
+  togglePanel: () => void;
+  panelMaximized: boolean;
+  setPanelMaximized: (maximized: boolean) => void;
+  /** The active tab's URL, kept in sync by the browser (evidence for investigations, AI context). */
   currentUrl: string;
-  splitLayout: 'single' | 'split-vertical' | 'split-horizontal';
-  setSplitLayout: (layout: 'single' | 'split-vertical' | 'split-horizontal') => void;
-  setActiveTabId: (tabId: string) => void;
   setCurrentUrl: (url: string) => void;
-  createNewTab: (url?: string, partitionKey?: string) => Promise<void>;
-  closeTab: (tabId: string) => void;
-  navigateTab: (url: string) => void;
 
   // Resizable Panel
   resizablePanelHeight: number;
@@ -112,6 +109,8 @@ interface AppState {
   sentinelUrl: string;
   sentinelStatus: 'disconnected' | 'connecting' | 'connected';
   sentinelMessage: string;
+  /** The live graph as SentinelGraph serves it (services plus deploys, alerts, incidents, people). */
+  sentinelSnapshot: SentinelSnapshot | null;
   connectSentinel: (baseUrl: string, adminToken: string) => Promise<void>;
   restoreSentinel: () => Promise<void>;
   refreshSentinelGraph: () => Promise<void>;
@@ -156,204 +155,6 @@ export const useAppStore = create<AppState>((set, get) => {
   const initialTheme: ThemeMode = (localStorage.getItem('devbrowser_theme') as ThemeMode) || 'dark';
   document.documentElement.setAttribute('data-theme', initialTheme);
 
-  const defaultPartitions: ProfilePartition[] = [
-    {
-      id: 'p-dev-1',
-      name: 'Default Developer',
-      partitionKey: 'persist:dev-default',
-      color: '#3b82f6',
-      isEphemeral: false,
-      createdAt: Date.now()
-    },
-    {
-      id: 'p-admin-2',
-      name: 'Admin Role',
-      partitionKey: 'persist:dev-admin',
-      color: '#ef4444',
-      isEphemeral: false,
-      createdAt: Date.now()
-    },
-    {
-      id: 'p-temp-3',
-      name: 'Ephemeral Incognito',
-      partitionKey: 'temp:dev-ephemeral',
-      color: '#10b981',
-      isEphemeral: true,
-      createdAt: Date.now()
-    }
-  ];
-
-  const defaultTabs: BrowserTab[] = [
-    {
-      id: 'tab-init-1',
-      partitionId: 'p-dev-1',
-      url: 'http://localhost:3000/cart',
-      title: 'Checkout & Cart — Localhost',
-      isLoading: false,
-      canGoBack: true,
-      canGoForward: false,
-      isPinned: false,
-      hibernation: { isHibernated: false, lastUrl: 'http://localhost:3000/cart' },
-      activeSplitPane: 'main'
-    },
-    {
-      id: 'tab-init-2',
-      partitionId: 'p-admin-2',
-      url: 'http://localhost:3000/admin/orders',
-      title: 'Admin Orders Portal',
-      isLoading: false,
-      canGoBack: false,
-      canGoForward: false,
-      isPinned: false,
-      hibernation: { isHibernated: false, lastUrl: 'http://localhost:3000/admin/orders' },
-      activeSplitPane: 'main'
-    }
-  ];
-
-  // Initial Sample CDP Network Transactions
-  const initialTransactions: NetworkTransaction[] = [
-    {
-      id: 'tx-101',
-      tabId: 'tab-init-1',
-      url: 'http://localhost:3000/api/v2/checkout',
-      method: 'POST',
-      statusCode: 200,
-      statusText: 'OK',
-      protocol: 'h2',
-      mimeType: 'application/json',
-      requestHeaders: {
-        'content-type': 'application/json',
-        'authorization': 'Bearer dev_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9',
-        'x-request-id': 'req_88f921ab'
-      },
-      responseHeaders: {
-        'content-type': 'application/json; charset=utf-8',
-        'x-powered-by': 'Express',
-        'content-length': '284',
-        'set-cookie': 'session_token=xyz123; Path=/'
-      },
-      requestBody: '{\n  "cartId": "cart_8831",\n  "paymentMethod": "pm_card_visa",\n  "total": 149.99\n}',
-      responseBody: '{\n  "orderId": "ord_990142",\n  "status": "confirmed",\n  "capturedAmount": 149.99,\n  "currency": "USD",\n  "processedAt": "2026-10-29T10:25:00.000Z"\n}',
-      isTruncated: false,
-      encodedBodyLength: 284,
-      timing: { requestTime: Date.now() - 3200, sendStart: 2, sendEnd: 5, receiveHeadersEnd: 42 },
-      startTime: Date.now() - 3200,
-      endTime: Date.now() - 3158
-    },
-    {
-      id: 'tx-102',
-      tabId: 'tab-init-1',
-      url: 'http://localhost:3000/api/v1/auth/session',
-      method: 'GET',
-      statusCode: 200,
-      statusText: 'OK',
-      protocol: 'h2',
-      mimeType: 'application/json',
-      requestHeaders: { 'accept': 'application/json' },
-      responseHeaders: { 'content-type': 'application/json' },
-      responseBody: '{\n  "user": {\n    "id": "usr_dev_42",\n    "email": "alex.dev@internal.app",\n    "role": "engineer"\n  }\n}',
-      isTruncated: false,
-      startTime: Date.now() - 5000,
-      endTime: Date.now() - 4982
-    },
-    {
-      id: 'tx-103',
-      tabId: 'tab-init-1',
-      url: 'http://localhost:3000/api/v1/inventory/check?itemId=m4-pro-01&token=AKIAIOSFODNN7EXAMPLE',
-      method: 'GET',
-      statusCode: 422,
-      statusText: 'Unprocessable Entity',
-      protocol: 'http/1.1',
-      mimeType: 'application/json',
-      requestHeaders: { 'accept': 'application/json' },
-      responseHeaders: { 'content-type': 'application/json' },
-      responseBody: '{\n  "error": "InvalidQueryParameter",\n  "message": "Token must be provided in Authorization header, not URL query parameter."\n}',
-      isTruncated: false,
-      startTime: Date.now() - 2100,
-      endTime: Date.now() - 2085
-    }
-  ];
-
-  // Initial Sample Passive Security Findings
-  const initialFindings: SecurityFinding[] = [
-    {
-      id: 'sec-001',
-      ruleId: 'SEC-HDR-001',
-      timestamp: Date.now() - 3000,
-      severity: 'HIGH',
-      title: 'Missing Content-Security-Policy (CSP)',
-      description: 'The target origin does not return a Content-Security-Policy header, leaving the application vulnerable to Cross-Site Scripting (XSS) and code injection.',
-      remediation: "Add 'Content-Security-Policy: default-src \\'self\\'; script-src \\'self\\'' to your web server response headers.",
-      evidence: {
-        url: 'http://localhost:3000/cart',
-        method: 'GET',
-        statusCode: 200,
-        rawSnippet: 'HTTP/1.1 200 OK\n(Headers present: content-type, etag, x-powered-by. Missing Content-Security-Policy)'
-      },
-      cwe: 1021,
-      owaspCategory: 'A05:2021-Security Misconfiguration',
-      isIgnored: false,
-      suppressionFingerprint: 'sec-hdr-001-localhost'
-    },
-    {
-      id: 'sec-002',
-      ruleId: 'SEC-CK-003',
-      timestamp: Date.now() - 2500,
-      severity: 'MEDIUM',
-      title: 'Session Cookie Missing SameSite & Secure Flags',
-      description: 'The session_token cookie was set without the SameSite attribute and without the Secure flag, increasing exposure to CSRF attacks.',
-      remediation: "Configure cookie directives: 'Set-Cookie: session_token=...; Secure; HttpOnly; SameSite=Lax'",
-      evidence: {
-        url: 'http://localhost:3000/api/v2/checkout',
-        method: 'POST',
-        statusCode: 200,
-        cookieName: 'session_token',
-        rawSnippet: 'Set-Cookie: session_token=xyz123; Path=/'
-      },
-      cwe: 614,
-      owaspCategory: 'A01:2021-Broken Access Control',
-      isIgnored: false,
-      suppressionFingerprint: 'sec-ck-003-session_token'
-    },
-    {
-      id: 'sec-003',
-      ruleId: 'SEC-LEAK-001',
-      timestamp: Date.now() - 2000,
-      severity: 'HIGH',
-      title: 'Sensitive Access Token in URL Query Parameter',
-      description: 'An API key or secret token was detected in the URL query parameters. URL query parameters are logged in browser history, proxy logs, and Referer headers.',
-      remediation: 'Pass sensitive credentials in the HTTP Authorization request header rather than query strings.',
-      evidence: {
-        url: 'http://localhost:3000/api/v1/inventory/check?token=AKIAIOSFODNN7EXAMPLE',
-        method: 'GET',
-        statusCode: 422,
-        rawSnippet: 'Query parameter: token=AKIAIOSFODNN7EXAMPLE'
-      },
-      cwe: 598,
-      owaspCategory: 'A04:2021-Insecure Design',
-      isIgnored: false,
-      suppressionFingerprint: 'sec-leak-001-token-query'
-    }
-  ];
-
-  // Initial Sample API Dependency Graph
-  const initialNodes: IGraphNode[] = [
-    { id: 'route:cart', type: 'FrontendRoute', name: '/cart UI', metadata: { framework: 'Next.js' } },
-    { id: 'service:api-gw', type: 'Service', name: 'API Gateway', metadata: { protocol: 'HTTP/2' } },
-    { id: 'ep:checkout', type: 'Endpoint', name: 'POST /checkout', metadata: { avgLatency: '42ms' } },
-    { id: 'service:billing', type: 'Service', name: 'BillingService', metadata: { status: 'healthy' } },
-    { id: 'service:inventory', type: 'Service', name: 'InventoryService', metadata: { status: 'degraded' } },
-    { id: 'db:orders', type: 'Database', name: 'PostgreSQL:Orders', metadata: { replicas: 2 } }
-  ];
-
-  const initialEdges: IGraphEdge[] = [
-    { sourceId: 'route:cart', targetId: 'service:api-gw', type: 'CALLS', metadata: { callCount: 14 } },
-    { sourceId: 'service:api-gw', targetId: 'ep:checkout', type: 'CALLS', metadata: { callCount: 14 } },
-    { sourceId: 'ep:checkout', targetId: 'service:billing', type: 'DEPENDS_ON', metadata: { averageLatencyMs: 38 } },
-    { sourceId: 'ep:checkout', targetId: 'service:inventory', type: 'DEPENDS_ON', metadata: { errorRate: 0.12 } },
-    { sourceId: 'service:billing', targetId: 'db:orders', type: 'PRODUCES', metadata: { protocol: 'gRPC' } }
-  ];
-
   return {
     // Theme
     theme: initialTheme,
@@ -369,79 +170,30 @@ export const useAppStore = create<AppState>((set, get) => {
 
     // Navigation
     activeView: 'browser',
-    setActiveView: (activeView) => set({ activeView }),
+    setActiveView: (activeView) => set(state => ({
+      activeView,
+      lastPanel: activeView === 'browser' ? state.lastPanel : activeView,
+      panelMaximized: activeView === 'browser' ? false : state.panelMaximized
+    })),
     sidebarCollapsed: false,
     toggleSidebar: () => set(state => ({ sidebarCollapsed: !state.sidebarCollapsed })),
 
-    // Tabs & Partitions
-    tabs: defaultTabs,
-    activeTabId: 'tab-init-1',
-    partitions: defaultPartitions,
-    currentUrl: 'http://localhost:3000/cart',
-    splitLayout: 'single',
-    setSplitLayout: (splitLayout) => set({ splitLayout }),
-    setActiveTabId: (activeTabId) => {
-      const tab = get().tabs.find(t => t.id === activeTabId);
-      set({ activeTabId, currentUrl: tab?.url || get().currentUrl });
+    lastPanel: 'network',
+    togglePanel: () => {
+      const { activeView, lastPanel } = get();
+      set(activeView === 'browser' ? { activeView: lastPanel } : { activeView: 'browser', panelMaximized: false });
     },
+    panelMaximized: false,
+    setPanelMaximized: (panelMaximized) => set({ panelMaximized }),
+    currentUrl: 'about:blank',
     setCurrentUrl: (currentUrl) => set({ currentUrl }),
-    createNewTab: async (url = 'http://localhost:3000', partitionKey = 'persist:dev-default') => {
-      const partition = get().partitions.find(p => p.partitionKey === partitionKey) || get().partitions[0]!;
-      const newTab: BrowserTab = {
-        id: `tab-${Date.now()}`,
-        partitionId: partition.id,
-        url,
-        title: url.replace('http://', '').replace('https://', '') || 'New Tab',
-        isLoading: false,
-        canGoBack: false,
-        canGoForward: false,
-        isPinned: false,
-        hibernation: { isHibernated: false, lastUrl: url },
-        activeSplitPane: 'main'
-      };
-      set(state => ({
-        tabs: [...state.tabs, newTab],
-        activeTabId: newTab.id,
-        currentUrl: url
-      }));
-      get().addToast({
-        type: 'info',
-        title: 'New Container Tab Opened',
-        message: `Profile: ${partition.name}`
-      });
-    },
-    closeTab: (tabId) => {
-      const currentTabs = get().tabs;
-      if (currentTabs.length <= 1) return;
-      const remaining = currentTabs.filter(t => t.id !== tabId);
-      set({
-        tabs: remaining,
-        activeTabId: remaining[0]?.id || '',
-        currentUrl: remaining[0]?.url || ''
-      });
-    },
-    navigateTab: (url) => {
-      set(state => ({
-        currentUrl: url,
-        tabs: state.tabs.map(t => t.id === state.activeTabId ? {
-          ...t,
-          url,
-          title: url.replace('http://', '').replace('https://', '')
-        } : t)
-      }));
-      get().addToast({
-        type: 'info',
-        title: 'Navigating',
-        message: url
-      });
-    },
 
     // Resizable Panel
     resizablePanelHeight: 320,
     setResizablePanelHeight: (resizablePanelHeight) => set({ resizablePanelHeight }),
 
     // Network
-    transactions: initialTransactions,
+    transactions: [],
     selectedTransactionId: 'tx-101',
     networkSearchQuery: '',
     networkFilter: 'all',
@@ -575,7 +327,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     // Security Auditor
-    findings: initialFindings,
+    findings: [],
     selectedFindingId: 'sec-001',
     securitySeverityFilter: 'all',
     setSelectedFindingId: (selectedFindingId) => set({ selectedFindingId }),
@@ -590,8 +342,8 @@ export const useAppStore = create<AppState>((set, get) => {
     setFindings: (findings) => set({ findings }),
 
     // Graph
-    graphNodes: initialNodes,
-    graphEdges: initialEdges,
+    graphNodes: [],
+    graphEdges: [],
     selectedNodeId: 'ep:checkout',
     blastRadius: null,
     tigerGraphStatus: 'disconnected',
@@ -650,7 +402,8 @@ export const useAppStore = create<AppState>((set, get) => {
     },
     sentinelUrl: 'http://localhost:8100',
     sentinelStatus: 'disconnected',
-    sentinelMessage: 'Not connected: showing the sample graph',
+    sentinelMessage: 'Not connected',
+    sentinelSnapshot: null,
     connectSentinel: async (baseUrl, adminToken) => {
       if (!window.devBrowserAPI) return;
       set({ sentinelUrl: baseUrl, sentinelStatus: 'connecting' });
@@ -677,8 +430,10 @@ export const useAppStore = create<AppState>((set, get) => {
     refreshSentinelGraph: async () => {
       if (!window.devBrowserAPI || get().sentinelStatus !== 'connected') return;
       try {
-        const { nodes, edges } = toDevBrowserGraph(await window.devBrowserAPI.sentinel.getGraph());
+        const snapshot = await window.devBrowserAPI.sentinel.getGraph();
+        const { nodes, edges } = toDevBrowserGraph(snapshot);
         set(state => ({
+          sentinelSnapshot: snapshot,
           graphNodes: nodes,
           graphEdges: edges,
           blastRadius: null,
@@ -779,24 +534,10 @@ export const useAppStore = create<AppState>((set, get) => {
         }));
         return;
       }
-      const edges = get().graphEdges.filter(e => e.sourceId === nodeId || e.targetId === nodeId);
-      const affectedIds = new Set<string>([nodeId]);
-      edges.forEach(e => { affectedIds.add(e.sourceId); affectedIds.add(e.targetId); });
-      const affectedNodes = get().graphNodes.filter(n => affectedIds.has(n.id));
-
-      set({
-        blastRadius: {
-          rootNodeId: nodeId,
-          affectedNodes,
-          impactScore: 0.65,
-          dependencyChain: [Array.from(affectedIds)]
-        }
-      });
-      get().addToast({
-        type: 'warning',
-        title: 'Blast Radius Calculated',
-        message: `${affectedNodes.length} interconnected services affected (Impact Score: 65%)`
-      });
+      // Blast radius is a traversal of the real graph; there is no offline estimate worth showing.
+      set({ blastRadius: null });
+      get().addToast({ type: 'info', title: 'SentinelGraph not connected',
+        message: 'Connect in Settings to compute the blast radius in the dependency graph.' });
     },
 
     // AI
@@ -923,20 +664,20 @@ export const useAppStore = create<AppState>((set, get) => {
       set(state => ({ toasts: state.toasts.filter(t => t.id !== id) }));
     },
     triggerNuclearShred: async () => {
-      if (window.devBrowserAPI) {
-        await window.devBrowserAPI.privacy.triggerNuclearShred();
+      try {
+        const result = window.devBrowserAPI ? await window.devBrowserAPI.privacy.triggerNuclearShred() : null;
+        useBrowserStore.setState({ history: [], closed: [] });
+        set({ transactions: [], findings: [], apiResponse: null, selectedTransactionId: null });
+        get().addToast({
+          type: 'success',
+          title: 'Browsing data cleared',
+          message: result ? `${result.purgedItemsCount} profiles signed out and cleared; history, credentials and captured traffic removed.`
+            : 'History and captured traffic removed.'
+        });
+      } catch (err) {
+        get().addToast({ type: 'error', title: 'Could not clear browsing data',
+          message: err instanceof Error ? err.message : String(err) });
       }
-      set({
-        transactions: [],
-        findings: [],
-        apiResponse: null,
-        selectedTransactionId: null
-      });
-      get().addToast({
-        type: 'error',
-        title: 'Nuclear Shred Executed',
-        message: 'All local session cookies, cache, and findings have been permanently destroyed.'
-      });
     }
   };
 });

@@ -67,6 +67,32 @@ npm run build
 
 ---
 
+## The Browser
+
+Every tab is a live page kept in memory: switching tabs or opening a tool panel never reloads it.
+
+* **Tabs:** titles, icons and loading state from the page; middle-click to close; reopen closed tabs; the session
+  (tabs, zoom, profile per tab) is restored on launch. Links that open windows (`target=_blank`, `window.open`)
+  open as tabs.
+* **Address bar:** URLs, `localhost:3000`, a bare port (`3000`), LAN and `.test` hosts get `http`; anything else is a
+  search. It shows whether a page is secure, local or not secure.
+* **Page tools:** find in page, zoom, the page's own Chrome DevTools, a context menu (open link in new tab, copy,
+  view source, inspect element), and an error page that explains `ERR_CONNECTION_REFUSED` and friends.
+* **Developer tools beside the page:** Network, Dependencies, API client, security and AI open in a resizable panel
+  next to the live page; maximize any of them.
+* **Device mode:** phones and tablets at their real CSS width, with their user agent and touch input. The page lays
+  out at the device width (the <webview> is sized to it); it renders at your screen's pixel ratio.
+* **Split view and profiles:** Default, Admin and Customer profiles each have their own cookies and storage; split
+  view shows the page as two profiles side by side, to compare roles.
+* **Shortcuts:** the app menu holds them, so they work while a page has focus. Press `?` for the list.
+* **Clear browsing data** signs out of every profile and removes history, credentials and captured traffic.
+
+The design uses neutral greys and three colours only: accent (interactive, healthy), warning (degraded) and danger
+(failures). Light and dark themes.
+
+End-to-end tests drive the built app against the sandbox: `npm run build`, `python ../sandbox/run.py up`, then
+`cd ../e2e && npx playwright test -c devbrowser.config.ts`.
+
 ## SentinelGraph Integration (TigerGraph dependency graph)
 
 The **Dependencies** view can show a live service graph from a SentinelGraph API (the H&H Goa incident graph backend), which keeps it in
@@ -83,6 +109,8 @@ What happens then:
   sent to `POST /api/browser-traffic`. The page's origin depends on each API host; after a codebase scan both
   resolve to the scanned services (`localhost:7404` is `checkout`), otherwise the page is a `web:<host>` app.
   Passive capture is topology only: it never changes health or fires alerts. Page assets and 4xx are ignored.
+* **Dependencies panel:** the same live graph as the web dashboard: services sized by PageRank, failures in warning
+  or danger, the agent's path lit up during an investigation, blast radius on any service, and Approve / Reject.
 * **Service context:** selecting a request in the Network panel shows the service behind it, its owner,
   on-call, health, blast radius and recent changes (`GET /api/resolve`).
 * **Investigate this failure:** on a 5xx, starts an investigation with that request as evidence, streams the

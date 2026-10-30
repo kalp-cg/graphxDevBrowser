@@ -16,14 +16,17 @@
     "start": "electron ."
   },
   "dependencies": {
+    "d3-force": "^3.0.0",
     "lucide-react": "^0.453.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-force-graph-2d": "^1.29.2",
     "zod": "^3.23.8",
     "zustand": "^5.0.16"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
+    "@types/d3-force": "^3.0.10",
     "@types/node": "^20.17.6",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

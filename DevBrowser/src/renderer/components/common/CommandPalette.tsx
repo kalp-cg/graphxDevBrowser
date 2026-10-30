@@ -16,6 +16,7 @@ import {
   Flame
 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
+import { useBrowserStore } from '../../store/useBrowserStore';
 
 interface CommandItem {
   id: string;
@@ -31,7 +32,7 @@ export const CommandPalette: React.FC = () => {
   const isOpen = useAppStore(s => s.commandPaletteOpen);
   const setOpen = useAppStore(s => s.setCommandPaletteOpen);
   const setActiveView = useAppStore(s => s.setActiveView);
-  const createNewTab = useAppStore(s => s.createNewTab);
+  const newTab = useBrowserStore(s => s.newTab);
   const clearTransactions = useAppStore(s => s.clearTransactions);
   const toggleTheme = useAppStore(s => s.toggleTheme);
   const theme = useAppStore(s => s.theme);
@@ -54,10 +55,9 @@ export const CommandPalette: React.FC = () => {
     {
       id: 'nav-browser',
       category: 'Navigation',
-      title: 'Go to Browser View',
-      subtitle: 'Inspect live web application session',
+      title: 'Close Tool Panel',
+      subtitle: 'Give the page the full window',
       icon: <Globe size={16} />,
-      shortcut: '⌘1',
       action: () => setActiveView('browser')
     },
     {
@@ -66,7 +66,6 @@ export const CommandPalette: React.FC = () => {
       title: 'Go to Network Inspector',
       subtitle: 'View live CDP stream, headers, and request bodies',
       icon: <Network size={16} />,
-      shortcut: '⌘2',
       action: () => setActiveView('network')
     },
     {
@@ -75,7 +74,6 @@ export const CommandPalette: React.FC = () => {
       title: 'Go to API Client',
       subtitle: 'Build, replay, and chain HTTP requests',
       icon: <Send size={16} />,
-      shortcut: '⌘3',
       action: () => setActiveView('apiClient')
     },
     {
@@ -84,16 +82,14 @@ export const CommandPalette: React.FC = () => {
       title: 'Go to Passive Security Auditor',
       subtitle: 'Review OWASP Top 10 evidence-based findings',
       icon: <ShieldAlert size={16} />,
-      shortcut: '⌘4',
       action: () => setActiveView('security')
     },
     {
       id: 'nav-graph',
       category: 'Navigation',
-      title: 'Go to API Dependency Graph',
-      subtitle: 'Visualize microservice topology & blast radius',
+      title: 'Open Dependency Graph',
+      subtitle: 'SentinelGraph: services, health, blast radius, investigations',
       icon: <Share2 size={16} />,
-      shortcut: '⌘5',
       action: () => setActiveView('dependencies')
     },
     {
@@ -102,7 +98,6 @@ export const CommandPalette: React.FC = () => {
       title: 'Go to Local AI Assistant',
       subtitle: 'On-device Ollama code & test assistant',
       icon: <Bot size={16} />,
-      shortcut: '⌘6',
       action: () => setActiveView('ai')
     },
     {
@@ -117,11 +112,11 @@ export const CommandPalette: React.FC = () => {
     {
       id: 'act-new-tab',
       category: 'Workspace',
-      title: 'New Container Tab',
-      subtitle: 'Open an isolated session partition',
+      title: 'New Tab',
+      subtitle: 'Open a page in the current profile',
       icon: <Plus size={16} />,
       shortcut: '⌘T',
-      action: () => createNewTab()
+      action: () => newTab()
     },
     {
       id: 'act-clear-network',
@@ -129,7 +124,6 @@ export const CommandPalette: React.FC = () => {
       title: 'Clear Network Log',
       subtitle: 'Purge all captured HTTP transactions',
       icon: <Trash2 size={16} />,
-      shortcut: '⌘K ⌘C',
       action: () => clearTransactions()
     },
     {
@@ -152,11 +146,11 @@ export const CommandPalette: React.FC = () => {
     {
       id: 'act-nuclear-shred',
       category: 'Actions',
-      title: 'Trigger Nuclear Shred',
-      subtitle: 'Permanently wipe SQLite storage, sessions, and Keychain secrets',
-      icon: <Flame size={16} color="#ef4444" />,
+      title: 'Clear Browsing Data',
+      subtitle: 'Cookies, storage and cache of every profile, saved credentials, captured traffic',
+      icon: <Flame size={16} color="var(--danger)" />,
       action: () => {
-        if (confirm('Trigger Nuclear Shred? This will erase all local databases and credentials.')) {
+        if (confirm('Clear cookies, storage and cache for every profile, saved credentials and captured traffic?')) {
           triggerNuclearShred();
         }
       }

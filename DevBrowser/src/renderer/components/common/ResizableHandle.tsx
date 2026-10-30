@@ -34,7 +34,7 @@ export const ResizableHandle: React.FC<ResizableHandleProps> = ({ onResize }) =>
         position: 'relative',
         zIndex: 20
       }}
-      className="transition-smooth hover:bg-cyan-500"
+      className="transition-smooth"
     >
       <div style={{
         position: 'absolute',

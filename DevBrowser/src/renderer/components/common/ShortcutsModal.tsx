@@ -8,38 +8,40 @@ export const ShortcutsModal: React.FC = () => {
 
   if (!isOpen) return null;
 
+  // Exactly what the app menu (src/main/browser/chrome.ts) and App.tsx wire up.
   const shortcutGroups = [
     {
-      category: 'Navigation & Views',
+      category: 'Tabs',
       shortcuts: [
-        { keys: '⌘ 1', description: 'Switch to Browser View' },
-        { keys: '⌘ 2', description: 'Switch to Network Inspector' },
-        { keys: '⌘ 3', description: 'Switch to API Client' },
-        { keys: '⌘ 4', description: 'Switch to Security Auditor' },
-        { keys: '⌘ 5', description: 'Switch to Dependency Graph' },
-        { keys: '⌘ 6', description: 'Switch to Local AI Assistant' },
-        { keys: '⌘ ,', description: 'Open Settings' }
+        { keys: '⌘ T', description: 'New tab' },
+        { keys: '⌘ W', description: 'Close tab' },
+        { keys: '⌘ ⇧ T', description: 'Reopen closed tab' },
+        { keys: '⌘ 1 – 8', description: 'Go to tab 1 – 8' },
+        { keys: '⌘ 9', description: 'Go to last tab' },
+        { keys: '⌃ Tab', description: 'Next tab (⌃ ⇧ Tab: previous)' },
+        { keys: 'Middle click', description: 'Close a tab' }
       ]
     },
     {
-      category: 'Browser & Workspace',
+      category: 'Page',
       shortcuts: [
-        { keys: '⌘ T', description: 'New Container Tab' },
-        { keys: '⌘ W', description: 'Close Active Tab' },
-        { keys: '⌘ R', description: 'Reload Active Tab' },
-        { keys: '⌘ L', description: 'Focus Omnibox Address Input' },
-        { keys: '⌘ K', description: 'Open Command Palette' },
-        { keys: '?', description: 'Open Keyboard Shortcuts Cheatsheet' }
+        { keys: '⌘ L', description: 'Address bar' },
+        { keys: '⌘ R', description: 'Reload (⌘ ⇧ R: ignore cache)' },
+        { keys: '⌘ [  ⌘ ]', description: 'Back, forward' },
+        { keys: '⌘ F', description: 'Find in page' },
+        { keys: '⌘ +  ⌘ -  ⌘ 0', description: 'Zoom in, out, reset' },
+        { keys: '⌥ ⌘ I', description: 'Page developer tools' }
       ]
     },
     {
-      category: 'Developer Suite & Actions',
+      category: 'Developer tools',
       shortcuts: [
-        { keys: '⌘ Enter', description: 'Send API Client Request' },
-        { keys: '⌘ K ⌘ C', description: 'Clear Network Stream' },
-        { keys: '⌘ \\', description: 'Toggle Left Navigation Sidebar' },
-        { keys: '⌘ D', description: 'Run Local AI Diagnosis' },
-        { keys: 'Esc', description: 'Close Modals / Cancel Operation' }
+        { keys: '⌘ ⇧ M', description: 'Device mode' },
+        { keys: '⌘ ⇧ S', description: 'Split view (compare as another profile)' },
+        { keys: '⌘ \\', description: 'Show or hide the tool panel' },
+        { keys: '⌘ K', description: 'Command palette' },
+        { keys: '⌘ ,', description: 'Settings' },
+        { keys: '?', description: 'This list' }
       ]
     }
   ];

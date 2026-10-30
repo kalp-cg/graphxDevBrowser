@@ -6,7 +6,6 @@ import {
   Database, 
   Flame, 
   Key, 
-  Volume2, 
   RefreshCw
 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
@@ -89,7 +88,7 @@ export const SettingsView: React.FC = () => {
               cursor: 'pointer',
               textAlign: 'left'
             }}
-            className="transition-smooth hover:bg-slate-800"
+            className="transition-smooth"
           >
             {tab.icon}
             <span>{tab.label}</span>
@@ -316,7 +315,7 @@ export const SettingsView: React.FC = () => {
                   External Provider Integrations
                 </h2>
                 <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                  Decoupled provider integrations for API dependency graphing and voice dictation.
+                  Connect the dependency graph and incident agent.
                 </p>
               </div>
 
@@ -400,8 +399,8 @@ export const SettingsView: React.FC = () => {
                     onClick={handleConnectSentinel}
                     disabled={sentinelStatus === 'connecting'}
                     style={{
-                      background: 'var(--accent-emerald)',
-                      color: '#000',
+                      background: 'var(--accent)',
+                      color: 'var(--accent-contrast)',
                       border: 'none',
                       borderRadius: '5px',
                       padding: '6px 14px',
@@ -416,121 +415,47 @@ export const SettingsView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Wispr Flow Card */}
-              <div style={{
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border-medium)',
-                borderRadius: '8px',
-                padding: '16px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '12px'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Volume2 size={18} color="var(--accent-indigo)" />
-                    <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                      Wispr Flow Voice Dictation Workflow
-                    </span>
-                  </div>
-
-                  <Badge label="Desktop Dictation Ready" variant="success" />
-                </div>
-
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                  <strong>Supported Workflow:</strong> Wispr Flow runs as a system-level assistant on macOS. Focus any input field, code editor, or the Local AI prompt bar, press your Wispr Flow hotkey, and spoken code/assertions will insert directly with auto-punctuation.
-                </div>
-
-                <div style={{
-                  background: 'var(--bg-primary)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: '6px',
-                  padding: '10px',
-                  fontSize: '11px',
-                  color: 'var(--text-muted)'
-                }}>
-                  Direct Voice Interface API mode (WebSocket streaming via <code>wss://platform-api.wisprflow.ai/ws</code>) is available for users with active Wispr Flow developer access keys.
-                </div>
-              </div>
             </div>
           )}
 
-          {/* 4. Storage & Nuclear Shred Tab */}
+          {/* 4. Browsing data */}
           {activeTab === 'storage' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div>
                 <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
-                  Local Storage & Data Destruction
+                  Browsing data
                 </h2>
                 <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                  Manage the local SQLite cache and execute complete cryptographic data purges.
+                  What Dev Browser keeps on this machine, and a way to clear it.
                 </p>
               </div>
 
-              <div style={{
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border-medium)',
-                borderRadius: '8px',
-                padding: '16px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}>
-                <div>
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                    Local SQLite Database (devbrowser.db)
-                  </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    Path: <code>~/Library/Application Support/DevBrowser/devbrowser.db</code>
-                  </div>
-                </div>
+              <ul style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft: '18px', fontSize: '13px',
+                color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                <li>Each profile (Default, Admin, Customer) has its own cookies, local storage, IndexedDB and cache.</li>
+                <li>Open tabs and browsing history, to restore your session and fill the new tab page.</li>
+                <li>The SentinelGraph address and admin token. The token is encrypted with the OS keychain.</li>
+                <li>Captured network traffic and security findings live in memory only, until you quit.</li>
+              </ul>
 
-                <Badge label="2.4 MB on disk" variant="outline" />
-              </div>
-
-              {/* Nuclear Shred Danger Card */}
-              <div style={{
-                background: 'rgba(239, 68, 68, 0.06)',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
-                borderRadius: '8px',
-                padding: '18px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '12px'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444' }}>
-                  <Flame size={20} />
-                  <span style={{ fontSize: '15px', fontWeight: 700 }}>Nuclear Shred (Cryptographic Wipe)</span>
-                </div>
-
+              <div style={{ border: '1px solid var(--border-medium)', borderRadius: '8px', padding: '16px', display: 'flex',
+                flexDirection: 'column', gap: '10px' }}>
+                <div style={{ fontSize: '14px', fontWeight: 600 }}>Clear browsing data</div>
                 <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                  This action permanently destroys all local SQLite history, purges all container session partitions (cookies, localStorage, IndexedDB), and securely removes all decrypted credentials from the macOS Keychain. This cannot be undone.
+                  Signs you out of every site in every profile and removes history, saved credentials, captured traffic
+                  and findings. Open tabs stay open. This cannot be undone.
                 </p>
-
                 <button
+                  className="btn danger"
+                  style={{ alignSelf: 'flex-start' }}
                   onClick={() => {
-                    if (confirm('CRITICAL: Permanently destroy all local databases, session cookies, and Keychain credentials?')) {
+                    if (confirm('Clear cookies, storage, cache and history for every profile, plus saved credentials?')) {
                       triggerNuclearShred();
                     }
                   }}
-                  style={{
-                    alignSelf: 'flex-start',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    background: '#ef4444',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    padding: '8px 18px',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    cursor: 'pointer'
-                  }}
-                  className="transition-smooth hover:bg-red-700"
                 >
                   <Flame size={14} />
-                  Execute Nuclear Shred
+                  Clear browsing data
                 </button>
               </div>
             </div>

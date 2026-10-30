@@ -24,7 +24,7 @@ export const ToastContainer: React.FC = () => {
   return (
     <div style={{
       position: 'fixed',
-      top: '52px',
+      bottom: '36px',
       right: '16px',
       display: 'flex',
       flexDirection: 'column',
