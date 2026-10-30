@@ -17,14 +17,16 @@ from pydantic import BaseModel
 from ..agent.llm import available_providers, make_llm
 from ..agent.loop import investigate
 from ..agent.mcp_client import GraphToolbox
+from .. import workspace
 from ..config import settings
 from ..db import get_graph
+from ..ingest import codebase
 from ..ingest.alerts import ingest_alertmanager
 from ..ingest.browser import to_otlp as browser_to_otlp
 from ..ingest.otel import ingest_traces, record_change
 from ..seed.generator import refresh_on_call
 from ..seed.scenarios import SCENARIOS, inject_chaos, inject_scenario, reset, service_count
-from ..tools import actions, read
+from ..tools import actions, read, rootcause
 from ..tools.common import now_ms
 from .graph_view import graph_snapshot, incidents_view
 
@@ -74,6 +76,8 @@ class RunManager:
         if self.toolbox is None:
             self.toolbox = await GraphToolbox().start()
         self.run_id = uuid.uuid4().hex[:12]
+        # Late joiners and pollers must never see the previous run's events as this one's.
+        self.hub.history = []
         self.task = asyncio.create_task(self._run(question, llm, self.run_id))
         return self.run_id
 
@@ -133,9 +137,35 @@ def require_admin(x_admin_token: str | None = Header(default=None),
 admin = [Depends(require_admin)]
 
 
+DEFAULT_QUESTION = "Alerts are firing. Investigate, find the root cause and fix it."
+
+
+class Evidence(BaseModel):
+    """A failed request a developer saw (DevBrowser's "Investigate this failure")."""
+    url: str
+    method: str = "GET"
+    status_code: int = 0
+    page_url: str = ""
+
+
 class RunRequest(BaseModel):
-    question: str = "Alerts are firing. Investigate, find the root cause and fix it."
+    question: str = DEFAULT_QUESTION
     provider: str | None = None
+    evidence: list[Evidence] = []
+
+
+def with_evidence(question: str, evidence: list[Evidence]) -> str:
+    """The question, plus what the developer saw, named by service so the agent can start from it."""
+    if not evidence:
+        return question
+    aliases = workspace.load()["aliases"]
+    lines = []
+    for e in evidence[:5]:
+        svc = workspace.resolve(e.url, aliases)
+        where = f" (service `{svc}`)" if svc else ""
+        page = f" on page {e.page_url}" if e.page_url else ""
+        lines.append(f"- {e.method} {e.url}{where} returned {e.status_code or 'no response'}{page}")
+    return f"{question}\n\nA developer saw these requests fail in the browser:\n" + "\n".join(lines)
 
 
 @app.get("/api/health")
@@ -150,7 +180,8 @@ async def health() -> dict:
     except RuntimeError as exc:
         llm = f"unavailable: {exc}"
     providers = await asyncio.to_thread(available_providers)
-    return {"tigergraph": db, "graph": settings.tg_graph, "llm": llm, "providers": providers,
+    return {"tigergraph": db, "backend": settings.graph_backend, "graph": settings.tg_graph, "llm": llm,
+            "providers": providers,
             "commit": (os.getenv("RENDER_GIT_COMMIT") or os.getenv("GIT_COMMIT") or "")[:7],
             "tools": runs.toolbox.names if runs.toolbox else [], "running": runs.busy}
 
@@ -221,10 +252,56 @@ async def otlp_traces(payload: dict[str, Any], component: str = "service") -> di
 @app.post("/api/browser-traffic", dependencies=admin)
 async def browser_traffic(records: list[dict[str, Any]]) -> dict:
     """Requests captured by DevBrowser ({pageUrl, url, method, statusCode, mimeType, startTime, endTime}):
-    page origin -> API host become dependencies, 5xx become failures of that host."""
-    out = await asyncio.to_thread(ingest_traces, get_graph(), browser_to_otlp(records))
+    page origin -> API host become dependencies. Topology only: health comes from traces, alerts and evidence."""
+    otlp = browser_to_otlp(records, workspace.load()["aliases"])
+    out = await asyncio.to_thread(ingest_traces, get_graph(), otlp, "service", False)
     await hub.broadcast({"type": "graph_update", "reason": "browser"})
     return out
+
+
+@app.post("/api/workspace", dependencies=admin)
+async def apply_workspace(manifest: dict[str, Any]) -> dict:
+    """A codebase scan (`python -m sentinel.ingest codebase PATH --push URL`): services, dependencies,
+    owners and recent changes into the graph; the addresses each service answers on into the workspace."""
+    for key in ("services", "databases", "dependencies", "aliases", "changes"):
+        if not isinstance(manifest.get(key), list if key != "aliases" else dict):
+            raise HTTPException(422, f"manifest.{key} is missing or has the wrong type")
+    out = await asyncio.to_thread(codebase.apply, get_graph(), manifest)
+    workspace.save({"repo": manifest.get("repo", ""), "source": manifest.get("source", ""),
+                    "scanned_at": now_ms(), "aliases": manifest["aliases"],
+                    "services": [s["name"] for s in manifest["services"]]})
+    await hub.broadcast({"type": "graph_update", "reason": "workspace"})
+    return out
+
+
+@app.get("/api/workspace")
+async def get_workspace() -> dict:
+    return workspace.load()
+
+
+@app.get("/api/resolve")
+async def resolve_url(url: str) -> dict:
+    """What the graph knows about the service behind a URL: owner, on-call, health, blast radius, recent
+    changes. DevBrowser shows this next to a captured request."""
+    host = workspace.host_of(url)
+    name = workspace.resolve(url) or host
+
+    def lookup() -> dict:
+        ctx = read.get_service_context(name)
+        if "error" in ctx:
+            return {"url": url, "host": host, "service": None, "known": False}
+        c, blast = ctx["result"], read.blast_radius(name)["result"]
+        changes = rootcause.recent_changes([name], 24 * 60)["result"]["changes"]
+        return {"url": url, "host": host, "service": name, "known": True,
+                "tier": c["service"]["tier"], "status": c["service"]["status"], "team": c["team"],
+                "slack_channel": c["slack_channel"], "on_call": [p["name"] for p in c["on_call"]],
+                "databases": [d["name"] for d in c["databases"]],
+                "blast_radius": {"count": blast["count"], "by_tier": blast["by_tier"],
+                                 "impacted": [i["name"] for i in blast["impacted"][:8]]},
+                "recent_changes": [{k: c[k] for k in ("uid", "version", "message", "author", "minutes_ago")}
+                                   for c in changes[:3]]}
+
+    return await asyncio.to_thread(lookup)
 
 
 @app.post("/api/alerts/alertmanager", dependencies=admin)
@@ -272,8 +349,24 @@ async def change(c: Change) -> dict:
 
 @app.post("/api/runs", dependencies=admin)
 async def start_run(req: RunRequest) -> dict:
-    run_id = await runs.start(req.question, req.provider)
+    if runs.busy:
+        raise HTTPException(409, "an investigation is already running")
+    if req.evidence:
+        # What the developer saw is a real signal: the failing requests become health and alerts first, so
+        # the investigation starts from them even when no trace pipeline reports this service.
+        now = now_ms()
+        records = [{"pageUrl": e.page_url or e.url, "url": e.url, "method": e.method, "statusCode": e.status_code,
+                    "mimeType": "application/json", "startTime": now, "endTime": now} for e in req.evidence]
+        await asyncio.to_thread(ingest_traces, get_graph(), browser_to_otlp(records, workspace.load()["aliases"]))
+    run_id = await runs.start(with_evidence(req.question, req.evidence), req.provider)
     return {"run_id": run_id}
+
+
+@app.get("/api/runs/current")
+async def current_run() -> dict:
+    """The latest run's events so far (the same ones the WebSocket streams), for clients that poll."""
+    events = [e for e in hub.history if e.get("run_id") == runs.run_id]
+    return {"run_id": runs.run_id, "running": runs.busy, "events": events}
 
 
 @app.get("/api/actions")

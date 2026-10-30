@@ -316,12 +316,42 @@ class GitHubExecutor(ActionExecutor):
         return True, f"github: open_breaker not configured for {service}"
 
 
+class SandboxExecutor(ActionExecutor):
+    """The local sandbox system (sandbox/shop): actions really change the running services, so the next
+    trace window shows whether the fix worked."""
+
+    def __init__(self, url: str | None = None) -> None:
+        self.url = (url or os.getenv("SANDBOX_URL", "http://localhost:7499")).rstrip("/")
+
+    def _control(self, action: str, service: str, live: bool) -> tuple[bool, str]:
+        if not live:
+            return True, f"dry-run: sandbox {action} {service}"
+        body = json.dumps({"action": action, "service": service}).encode()
+        try:
+            req = urllib.request.Request(f"{self.url}/__control", body, {"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status == 200, f"sandbox: {json.loads(r.read()).get('detail', action)}"
+        except Exception as exc:  # noqa: BLE001
+            return False, f"sandbox error: {exc}"
+
+    def rollback(self, service: str, deployment_uid: str, live: bool = False) -> tuple[bool, str]:
+        return self._control("rollback", service, live)
+
+    def scale_up(self, service: str, live: bool = False) -> tuple[bool, str]:
+        return self._control("scale_up", service, live)
+
+    def open_breaker(self, service: str, live: bool = False) -> tuple[bool, str]:
+        return self._control("open_breaker", service, live)
+
+
 def get_executor() -> ActionExecutor:
     adapter = os.getenv("ACTION_ADAPTER", "dry_run").lower()
     if adapter in ("kubernetes", "k8s"):
         return KubernetesExecutor()
     if adapter in ("github", "gh"):
         return GitHubExecutor()
+    if adapter == "sandbox":
+        return SandboxExecutor()
     return DryRunExecutor()
 
 

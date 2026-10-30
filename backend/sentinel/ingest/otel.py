@@ -14,6 +14,7 @@ A component is a service (`service.name`, microservices) or a code module inside
 monolith: see monolith.py). Optional resource attributes `service.team`, `service.tier`, `service.version`
 and `telemetry.sdk.language` fill in ownership and metadata.
 """
+import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,6 +24,9 @@ from ..tools.common import now_ms
 
 ERROR_RATE = 0.05  # alert threshold
 DOWN_RATE = 0.5
+# Fail fast, recover slowly: a firing component must look healthy for this long before its alert resolves. One
+# clean batch in a noisy stream (a few requests, none failed by chance) is not a recovery.
+RECOVERY_MS = int(os.getenv("OTEL_RECOVERY_MS", "15000"))
 WRITE_OPS = {"INSERT", "UPDATE", "DELETE", "UPSERT", "SET", "HSET", "PUT", "MERGE", "CREATE"}
 SERVER, CLIENT, CONSUMER = 2, 3, 5
 KINDS = {"SPAN_KIND_SERVER": SERVER, "SPAN_KIND_CLIENT": CLIENT, "SPAN_KIND_CONSUMER": CONSUMER}
@@ -136,15 +140,32 @@ def analyze(spans: list[Span], meta: dict[str, dict[str, str]]) -> dict[str, Any
     return {"components": comps, "calls": calls, "protocols": protocols, "dbs": dbs, "db_engines": db_engines}
 
 
-def write(graph: Graph, found: dict[str, Any], kind: str = "service", at: int | None = None) -> dict[str, Any]:
+def write(graph: Graph, found: dict[str, Any], kind: str = "service", at: int | None = None,
+          health: bool = True) -> dict[str, Any]:
     """Upsert what the traces showed. Each unhealthy component gets one firing `error_rate` alert (updated, not
-    duplicated, by later batches); a component that is healthy again gets its alert resolved."""
+    duplicated, by later batches); a component seen healthy again gets its alert resolved. A component this
+    batch didn't see keeps its state: another source (collector, region) may be reporting it. A firing
+    component that looks healthy keeps its status and alert until it has stayed healthy for RECOVERY_MS.
+
+    `health=False` writes topology only (components, calls, databases): new components start healthy and
+    nothing else changes status or alerts. That is how passive browser traffic is written."""
     at = at or now_ms()
     batch = Batch()
     comps: dict[str, Component] = found["components"]
+    existing = set() if health else {v["v_id"] for v in graph.getVertices("Service", select="name")}
+    alert_uids = {f"alert:otel-{c.name}": c for c in comps.values()}
+    firing_at = {v["v_id"]: v["attributes"]["at"]
+                 for v in graph.getVertices("Alert", where='scenario="otel",status="firing"')} if health else {}
+    holding = {uid for uid, c in alert_uids.items()
+               if c.status == "healthy" and uid in firing_at and at - firing_at[uid] < RECOVERY_MS}
     rows = []
     for c in comps.values():
-        row = {"uid": f"svc:{c.name}", "name": c.name, "kind": kind, "status": c.status, "root_fault": c.root_fault}
+        row = {"uid": f"svc:{c.name}", "name": c.name, "kind": kind}
+        if health:
+            if f"alert:otel-{c.name}" not in holding:
+                row.update(status=c.status, root_fault=c.root_fault)
+        elif row["uid"] not in existing:
+            row.update(status="healthy", root_fault=False)
         for key, attr in (("version", "version"), ("tier", "tier"), ("language", "language")):
             if c.meta.get(key):
                 row[attr] = c.meta[key]
@@ -164,28 +185,29 @@ def write(graph: Graph, found: dict[str, Any], kind: str = "service", at: int | 
     for (svc, db), rel in sorted(found["dbs"].items()):
         link(batch, "Service", rel, "Database", [(f"svc:{svc}", f"db:{db}", {"uid": f"e:{svc}-{rel.lower()}->{db}"})])
 
-    alert_uids = {f"alert:otel-{c.name}": c for c in comps.values()}
-    known = {v["v_id"] for v in graph.getVertices("Alert", select="status", where='scenario="otel"')}
-    firing = [uid for uid, c in alert_uids.items() if c.status != "healthy"]
-    upsert(batch, "Alert", [
-        {"uid": uid, "id": uid.removeprefix("alert:"), "metric": "error_rate", "value": round(c.error_rate, 3),
-         "threshold": ERROR_RATE, "at": at, "status": "firing", "scenario": "otel"}
-        for uid, c in alert_uids.items() if uid in firing
-    ] + [{"uid": uid, "status": "resolved"} for uid in known if uid not in firing])
-    link(batch, "Alert", "FIRED_ON", "Service", [(uid, f"svc:{alert_uids[uid].name}") for uid in firing])
+    firing = [uid for uid, c in alert_uids.items() if c.status != "healthy"] if health else []
+    if health:
+        upsert(batch, "Alert", [
+            {"uid": uid, "id": uid.removeprefix("alert:"), "metric": "error_rate", "value": round(c.error_rate, 3),
+             "threshold": ERROR_RATE, "at": at, "status": "firing", "scenario": "otel"}
+            for uid, c in alert_uids.items() if uid in firing
+        ] + [{"uid": uid, "status": "resolved"} for uid in firing_at
+             if uid in alert_uids and uid not in firing and uid not in holding])
+        link(batch, "Alert", "FIRED_ON", "Service", [(uid, f"svc:{alert_uids[uid].name}") for uid in firing])
     batch.send(graph)
     return {
         "components": len(comps), "calls": len(found["calls"]), "databases": len(found["db_engines"]),
         "unhealthy": sorted(c.name for c in comps.values() if c.status != "healthy"),
         "root_faults": sorted(c.name for c in comps.values() if c.root_fault),
         "alerting": sorted(uid.removeprefix("alert:otel-") for uid in firing),
+        "recovering": sorted(uid.removeprefix("alert:otel-") for uid in holding),
     }
 
 
-def ingest_traces(graph: Graph, payload: dict, component: str = "service") -> dict[str, Any]:
-    """Parse an OTLP/JSON export and write its topology, health and alerts to the graph."""
+def ingest_traces(graph: Graph, payload: dict, component: str = "service", health: bool = True) -> dict[str, Any]:
+    """Parse an OTLP/JSON export and write its topology (and, unless health=False, health and alerts)."""
     spans, meta = parse(payload, component)
-    return write(graph, analyze(spans, meta), kind="module" if component == "module" else "service")
+    return write(graph, analyze(spans, meta), kind="module" if component == "module" else "service", health=health)
 
 
 def record_change(graph: Graph | Batch, service: str, version: str, at: int, author: str, message: str,

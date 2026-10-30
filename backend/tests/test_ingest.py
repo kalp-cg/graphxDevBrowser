@@ -6,6 +6,7 @@ from graphq import firing, unhealthy
 from sentinel.ingest import monolith, otel, sandbox
 from sentinel.seed.generator import seed_baseline
 from sentinel.tools import actions, rootcause
+from sentinel.tools.read import firing_alerts
 
 BACKEND = Path(__file__).resolve().parents[1]
 
@@ -161,9 +162,27 @@ def test_browser_traffic_through_the_api(graph, monkeypatch):
         seed_baseline(graph)
         with TestClient(app, headers={"X-Admin-Token": "test-admin-token"}) as c:
             out = c.post("/api/browser-traffic", json=browser_records()).json()
-            assert out["root_faults"] == ["payments.shop.local"]
+            assert out["components"] == 3 and out["alerting"] == []  # passive capture: topology only
+            assert "payments.shop.local" not in unhealthy(graph) and firing(graph) == 0
             radius = c.get("/api/services/payments.shop.local/blast-radius").json()
             assert [r["name"] for r in radius["result"]["impacted"]] == ["web:localhost:3000"]
             assert c.get("/api/services/nope/dependencies").status_code == 404
+    finally:
+        seed_baseline(graph)
+
+
+def test_recovery_needs_a_sustained_healthy_window(graph):
+    """Fail fast, recover slowly: one clean batch in a noisy stream must not resolve a firing alert."""
+    seed_baseline(graph)
+    try:
+        bad, good = analyzed("microservices", "paymentFailure"), analyzed("microservices", None)
+        t0 = 1_800_000_000_000
+        otel.write(graph, bad, at=t0)
+        assert "payment" in unhealthy(graph) and firing(graph) > 0
+        out = otel.write(graph, good, at=t0 + 2_000)  # a lucky window 2 s later
+        assert "payment" in out["recovering"] and "payment" in unhealthy(graph) and firing(graph) > 0
+        out = otel.write(graph, good, at=t0 + otel.RECOVERY_MS)
+        assert out["recovering"] == [] and "payment" not in unhealthy(graph)
+        assert not any(a["service"] == "payment" for a in firing_alerts(graph))
     finally:
         seed_baseline(graph)
