@@ -47,7 +47,7 @@ def load_company(graph: Graph) -> dict[str, Any]:
 
 def describe(graph: Graph) -> dict[str, Any]:
     """What is in the graph, counted from the graph itself."""
-    n = lambda vtype: len(graph.getVertices(vtype, select="name"))  # noqa: E731
+    n = lambda vtype: len(graph.getVertices(vtype, select="uid"))  # noqa: E731
     services = [v["attributes"] for v in graph.getVertices("Service", select="name,kind,layer,tier")]
     real = [s for s in services if s.get("kind") != "database"]
     layers: dict[str, int] = {}
