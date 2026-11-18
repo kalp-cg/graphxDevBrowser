@@ -28,7 +28,9 @@ investigation agent need SentinelGraph (next step).
 
 ## 2. Run SentinelGraph
 
-SentinelGraph is the server that builds the map. Run it on your own machine. **It has no login: it listens on
+SentinelGraph is the server that builds the map. **Run from source, DevBrowser starts it for you**: `cd DevBrowser && npm run dev`
+(or `./scripts/demo.sh` for the sample company) starts it on `127.0.0.1:8100`, connects to it, and stops it when you quit. The
+options below are for running it on its own, for example next to an installed DevBrowser. **It has no login: it listens on
 127.0.0.1 only and must never be exposed to a network.** See [Security](SECURITY.md).
 
 ### Option A: one command (Python 3.12)
@@ -61,12 +63,14 @@ graph queries (service names, alert metrics, commit messages and authors).
 
 ## 3. Connect DevBrowser to it
 
-1. In DevBrowser choose **Connect SentinelGraph** on the new-tab page (or **Settings → Integrations**).
-2. Enter `http://127.0.0.1:8100` and press **Connect & Load Graph**. The status bar shows *SentinelGraph connected*.
+Only when you started SentinelGraph yourself (Option A or B): run from source, DevBrowser is already connected.
+
+1. Open **Settings → Integrations** (or **Connect SentinelGraph** on the new-tab page).
+2. Enter `http://127.0.0.1:8100` and press **Connect & Load Graph**. The sidebar shows the number of services.
 
 ## 4. Connect a project
 
-1. Open the SentinelGraph panel (the share icon in the left rail) and press **Connect codebase…**.
+1. Press **Connect codebase…** on **Overview** (or on the new-tab page, or `⌘K` → *Connect a codebase*).
 2. Pick the folder of a repository.
 
 You get one of these, depending on how the project is built:

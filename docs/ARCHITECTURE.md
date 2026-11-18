@@ -21,7 +21,7 @@ flowchart LR
     API --> SCAN & INGEST & AGENT
     AGENT <--> MCP
   end
-  GRAPH[("Graph: TigerGraph, or the embedded engine")]
+  GRAPH[("Graph: embedded engine, one file")]
   MAIN -- "HTTP, 127.0.0.1" --> API
   SCAN & INGEST --> GRAPH
   MCP <--> GRAPH
@@ -32,8 +32,10 @@ flowchart LR
   or the credentials.
 - **The server** builds the graph (scanner and ingest), and answers questions about it through thirteen graph tools. The
   agent is a loop that calls only those tools; it cannot write to the graph except by *proposing* an action.
-- **The graph** is TigerGraph (GSQL, multi-hop traversal and graph algorithms) when `TG_HOST` is set, otherwise an
-  embedded engine with the same query surface, so the whole product runs on one laptop with no cloud account.
+- **The graph** is an embedded engine (`backend/sentinel/localgraph.py`): multi-hop traversals and graph algorithms
+  (PageRank, betweenness) over one file, with no database server and no cloud account, so the whole product runs on one laptop.
+- **One product, one command.** Run from a checkout, DevBrowser starts the SentinelGraph server itself on `127.0.0.1:8100`
+  and stops it when it quits (`src/main/integrations/sentinel-server.ts`).
 
 ## Data flow
 
@@ -51,10 +53,15 @@ flowchart LR
 | Docker Compose (with `.env`, in the root or `deploy/`, `docker/`, …) | services, databases, `depends_on`, service URLs in environment variables, published ports (so browser traffic to `localhost:7004` lands on the right service) |
 | Kubernetes manifests | Deployments and StatefulSets as services, Services for ports and exposure, environment values that name another workload |
 | Source imports (TypeScript, JavaScript, Python) | for a monolith: modules, module-to-module imports (with `tsconfig` path aliases), databases (Prisma, `pg`, …) and outside APIs (SDKs, API hosts, environment variables actually used) |
+| Declared workspaces (`workspaces.py`): npm/Yarn/pnpm, Gradle, Swift Package Manager, Cargo, Maven, .NET solutions, `go.work` | a monorepo's packages, and the dependencies between them its manifests declare (test, example and docs packages left out) |
+| Source of other languages (Go, Java, Kotlin, Swift, Rust, Ruby, PHP, C#, ...) | modules (JVM source roots and shared package prefixes skipped), their dependencies from the types each one uses, and the databases the code uses (JPA, `database/sql`, ActiveRecord, Entity Framework, ...) |
 | `CODEOWNERS`, git log | owners, and which commit touched which service or module |
 | Name heuristics | monitoring, load generators, feature-flag servers and one-shot jobs are left out; stores such as `*-db`, `mysql`, `kafka` are databases |
 
-A service built from the repository root with no folder of its own is treated as a monolith, and replaced by its modules.
+A repository that is one app (built from its root, the only app in its compose file, or code at the root next to helper
+folders such as `e2e/` or `docs/`) is replaced by its modules. A compose file that only runs databases maps the app in the
+repository and links it to them. Dependency and build folders (`node_modules`, `target`, `dist*`, `.venv`, ...) are never
+walked. A folder with no code is refused with a reason. `sandbox/codebases.py` checks all of this on 20 public repositories.
 
 ## The graph model
 

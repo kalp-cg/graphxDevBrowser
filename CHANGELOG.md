@@ -2,6 +2,45 @@
 
 All notable changes. Versions follow [semantic versioning](https://semver.org/).
 
+## 1.3.0 (2026-11-18)
+
+### One product, one command
+- From a checkout, DevBrowser starts SentinelGraph itself (`127.0.0.1:8100`), connects to it and stops it on quit: no separate
+  backend or dashboard to run. `make demo` (or `./scripts/demo.sh`) opens it on a clean sample company; `make dev`, `make test`,
+  `make e2e` and `make codebases` cover everything else.
+- The graph is the embedded engine only. TigerGraph and `pyTigerGraph` are gone (the `db` field of `/api/health` replaces
+  `tigergraph`; the app still reads the old field from older servers). The Next.js web dashboard is removed: DevBrowser is the product.
+- Editors that export `ELECTRON_RUN_AS_NODE` (VS Code, Antigravity, Cursor) no longer break `npm run dev`.
+
+### Connect codebase works on every shape of repository
+- Reads the workspaces monorepos declare: npm, Yarn and pnpm workspaces, Gradle, Swift Package Manager, Cargo, Maven, .NET solutions
+  and Go workspaces, with the dependencies between their packages.
+- A single app is mapped as one app even with helper folders next to it (`e2e/`, `docs/`, an admin `ui/`); Compose files that only
+  run databases map the app in the repository and link it to them; JVM source roots, flat Python packages, relative imports,
+  Svelte/Vue/Astro components and database use in Java, Go, Ruby, C#, PHP, Rust, Swift and Kotlin are read.
+- `node_modules`, `target/`, `.venv` and other dependency folders are never walked. A folder with no code is refused with a reason.
+- New: `sandbox/codebases.py` scans 20 public repositories of every shape: 20 of 20 map as expected (10 of 20 before), each in under
+  half a second. It also runs in CI on main.
+
+### A browser you want to open
+- New look: Ink, Sea and Coral (two primary colours and one highlight), the page and tools as rounded cards on the browser chrome,
+  Space Grotesk headings, a new icon.
+- A labelled, grouped sidebar (Your system, Inspect this page, Build, Browser) that collapses to icons; a new-tab page with a search
+  bar, your sites, what runs on this machine and the health of your system; **Overview** (health, alerts, changes, approvals);
+  **History & bookmarks**; and **Guide**, the whole product on one page with a *Try it* button per journey.
+- Search (`⌘K`) lists every action grouped like the sidebar, including Investigate, Check my changes and Connect a codebase.
+- System map: services laid out in tiers, a tidier toolbar (secondary actions under More), the root cause and fixes first in the report.
+- Plain words in Security and the AI assistant, which now says how to start Ollama instead of claiming to be ready.
+
+### Fixed
+- An investigation cancelled by a reset no longer leaves the map stuck on "Investigating…".
+- Requests captured before you connected another codebase (or loaded the sandbox company) no longer show up as services
+  on the new map.
+- A notification no longer blocks the control under it.
+- The interface keeps watching (dev servers, investigations) while another window is in front.
+- A taken port names the program holding it on Linux (`node`, not `MainThread`).
+- The Network filter no longer overlaps its buttons; Run and Console panels have titles; the recorder's timer no longer jitters.
+
 ## 1.2.0 (2026-10-31)
 
 ### Ships with a hosted demo

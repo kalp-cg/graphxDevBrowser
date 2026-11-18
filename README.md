@@ -25,13 +25,17 @@ actually broken, what changed, and who owns it?*
 | :--- | :--- |
 | **A real browser** | Tabs, split view, separate profiles, device emulation, find, zoom, session restore. Dev servers are one click away (`:3000`, `:5173`, ...). |
 | **Inspect as you browse** | Network (with a real timing waterfall), Security, an API client that really sends requests, and a local AI assistant dock beside the page. Network and Security show the website you are on, with History for everything before. |
-| **A map of your system** | Point DevBrowser at a repository. Services, databases, outside APIs and the connections between them appear; for a monolith, its modules and their imports. |
+| **A map of your system** | Point DevBrowser at a repository. Services, databases, outside APIs and the connections between them appear; for a monorepo, its packages; for a single app, its modules and their imports. Works on microservices, monorepos, mobile apps and libraries in every common language. |
 | **Root cause, not symptoms** | Break something (or have something break) and press **Investigate**. The agent walks the graph to the shared dependency, names the change that caused it, and proposes a fix. It handles databases and several simultaneous failures, and says how sure it is. |
 | **Know the blast radius before you merge** | **Check my changes** shows which services your uncommitted work touches and what depends on them; the same check comments on pull requests in CI. |
 | **You stay in charge** | The agent can only *propose*. Nothing is rolled back, scaled or paged until you approve it. |
 
 <p align="center">
-  <img src="docs/images/app-investigation.png" alt="DevBrowser: a failing service found as the root cause, with the proposed fixes" width="900">
+  <img src="docs/images/app-investigation.png" alt="DevBrowser's System map: the agent's path to the root cause, inventory-db-proxy, with the change behind it and three proposed fixes waiting for approval" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/images/app-overview.png" alt="DevBrowser's Overview: three alerts firing, the services, dependencies and teams mapped, recent changes and the most critical services" width="900">
 </p>
 
 ## Install
@@ -56,12 +60,19 @@ The installers are not code-signed, so macOS and Windows warn you once:
 
 More in [Getting started](docs/GETTING_STARTED.md#first-launch).
 
-## Five minutes to your first map
+## Run it: one command
 
-1. Start SentinelGraph on your machine: `./scripts/sentinelgraph.sh` (or Docker, see [Getting started](docs/GETTING_STARTED.md)).
-2. Open DevBrowser. On the new-tab page choose **Connect SentinelGraph**, enter `http://127.0.0.1:8100`.
-3. Click **Connect codebase…** and pick a repository folder.
-4. Open the SentinelGraph panel. Type a service name in **Find a service**, choose **Crash it**, then **Investigate**.
+```bash
+./scripts/demo.sh          # the demo: a 38-service sample company, from a clean slate
+cd DevBrowser && npm run dev   # everyday use: your own connected project
+```
+
+DevBrowser starts SentinelGraph by itself (on `127.0.0.1:8100`, stopped when you quit), so there is no separate
+backend or dashboard to run. The graph is embedded: no database server, no cloud account.
+
+Then, in the app: **Overview** shows your system's health and what changed. **Connect codebase…** maps your own
+repository. On the **System map**, pick a service, **Ship a bad deploy**, then **Investigate**: the agent names the root
+cause and the change behind it, and proposes fixes that wait for your approval.
 
 ## Documentation
 
@@ -76,25 +87,55 @@ More in [Getting started](docs/GETTING_STARTED.md#first-launch).
 | [Releasing](docs/RELEASING.md) | Building installers, signing, publishing |
 | [Changelog](CHANGELOG.md) | What changed |
 
+## What you can do, start to finish
+
+The same five journeys are in the app itself: **Guide**, at the bottom of the sidebar, with a *Try it* button for each.
+
+| Journey | How |
+| :--- | :--- |
+| **Open your app and see what it does** | **Run** starts your dev server and opens its page; **Network**, **Console** and **Security** show what that page does. |
+| **Map your codebase** | **Connect codebase…** → **Overview** (what was found) → **System map** (how it connects). |
+| **Find out why something broke** | Alerts appear on **Overview** → **Investigate** → root cause, the change behind it, its owner → approve or reject the proposed fixes. |
+| **Check a change before you merge** | **Check my changes**: which services your uncommitted work touches and everything that depends on them. |
+| **Hand a bug to a teammate** | **Bug Recorder** → one file of clicks, requests and errors → they replay it and see whether it reproduces. |
+
+Every action is also one search away: `⌘K` / `Ctrl+K`.
+
 ## What it reads from your code
 
 No diagrams to draw, nothing to annotate. From a repository SentinelGraph reads:
 
 - **Docker Compose** and **Kubernetes manifests**: services, databases, and who depends on whom (including `${VARIABLES}` from `.env`).
-- **Source imports** (TypeScript, JavaScript, Python): the modules of a monolith and which call which, plus the databases and outside APIs each one uses.
+- **Declared workspaces**: npm, Yarn and pnpm workspaces, Gradle (Android, Kotlin, Java), Swift Package Manager, Cargo, Maven,
+  .NET solutions and Go workspaces, with the dependencies between packages their manifests declare.
+- **Source imports**: for a single app, its modules and which uses which, in TypeScript, JavaScript, Svelte, Vue, Python, Go,
+  Java, Kotlin, Swift, Rust, Ruby, PHP, C# and more, plus the databases and outside APIs each module uses.
 - **CODEOWNERS**: who owns what. **Git history**: which commit touched which service, and who wrote it.
 - **OpenTelemetry traces** and **your own browsing**: the calls that really happen at runtime.
+
+A folder with no code is refused with a reason rather than mapped as a made-up app. The **codebase sandbox**
+(`sandbox/codebases.py`) checks all of this against 20 public repositories of every shape: currently 20 of 20 map as
+expected, each in under half a second.
+
+## Every command
+
+| | |
+| :--- | :--- |
+| `make demo` | The demo: DevBrowser with its own SentinelGraph on a clean 38-service sample company |
+| `make dev` | DevBrowser from source, on your own connected project |
+| `make test` | Unit tests: the server (Python) and the app (TypeScript), plus type checks and lint |
+| `make e2e` | The real, built app driven end to end against a live microservice shop (starts and stops the shop) |
+| `make codebases` | The codebase sandbox: scan 20 real repositories |
 
 ## Project layout
 
 ```
-DevBrowser/   the desktop app (Electron, React, TypeScript)
-backend/      SentinelGraph server (Python, FastAPI) and its graph tools
-frontend/     optional web dashboard (Next.js)
+DevBrowser/   the desktop app (Electron, React, TypeScript); starts SentinelGraph itself
+backend/      SentinelGraph server (Python, FastAPI), its embedded graph engine and graph tools
 sandbox/      a small live microservice shop for trying everything on your machine
 e2e/          end-to-end tests that drive the real, built app
 docs/         documentation
-scripts/      one-command launchers
+scripts/      launchers: demo.sh (the demo), sentinelgraph.sh (the server alone)
 ```
 
 ## Build from source
@@ -102,7 +143,7 @@ scripts/      one-command launchers
 ```bash
 cd DevBrowser
 npm ci
-npm run dev          # run from source
+npm run dev          # run from source (starts SentinelGraph too; ./scripts/demo.sh once creates backend/.venv)
 npm test             # unit tests
 npm run dist         # installers for this OS, in DevBrowser/release/
 ```

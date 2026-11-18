@@ -1,144 +1,96 @@
-# Demo Video Script — SentinelGraph
-**Target: 2:30 · Hard max: 3:00**
-**Live URL: https://graph-hacks-alpha.vercel.app**
+# Demo day script: DevBrowser + SentinelGraph
+
+For a room of founders and investors. **Pitch 4 minutes, live demo 3 minutes, questions after.**
+Every number below is sourced or measured; where it is neither, it says so. Do not add numbers on stage that are not
+in [PRODUCT.md](PRODUCT.md) or [PROJECT.md](PROJECT.md).
 
 ---
 
-## Before You Hit Record
+## Before you go on stage (10 minutes before)
 
 ```bash
-# Reset with memory preserved from a previous run
-curl -X POST   "https://sentinelgraph-api-relh.onrender.com/api/reset?keep_memory=true"
+./scripts/demo.sh        # clean sample company, DevBrowser opens with SentinelGraph already running
 ```
 
-
-- Browser fullscreen, zoom 100%, no bookmarks bar
-- Use headphones mic or a quiet room
-- Practice once without recording
-
----
-
-## Shot-by-Shot
-
-### 0:00 – 0:12 | Opening — calm green graph
-
-**On screen:** Full-screen dashboard. 38 green nodes, edges connecting them. Cost ticker shows $0/min.
-
-**Say:**
-> "It's 3 AM. Checkout is timing out. Thirty-eight services, eight teams. What broke — and who fixes it?
-> This is SentinelGraph, an incident commander that thinks in graphs."
+- Laptop on power, notifications off, display mirrored, window maximised.
+- In the app: open **Overview** once (it should say *All 38 services healthy*), then go back to a **New tab**.
+- Wi-Fi is not needed: everything runs on the laptop. That is part of the story.
+- Backup: the screenshots in `docs/images/` and a screen recording of one full run, in case the laptop fails.
 
 ---
 
-### 0:12 – 0:22 | Inject the incident
+## The pitch (4 minutes)
 
-**Action:** Click **"db-pool-exhaustion"** in the Break Production panel.
+**1. The moment everyone in the room knows (30 s)**
+> "It's 2 a.m. Forty alerts fire across a dozen services. Every one of them is a symptom. The on-call engineer has
+> one question: which *one* thing is actually broken, what changed, and who owns it? Today that answer lives in
+> five dashboards, a stale diagram and a senior engineer's head."
 
-**On screen:** Three nodes flash red — `checkout-api`, `cart-service`, `orders-service`. Cost ticker climbs to $1,700/min (checkout-api, cart-service and orders-service count half while degraded).
+**2. Why it matters (30 s)**
+> "Over 90% of mid-size and large companies say an hour of downtime costs them more than $300,000 (ITIC 2024).
+> The median high-impact outage costs $1.9 million an hour (New Relic 2024). Detecting it is solved. *Explaining*
+> it is not."
 
-**Say:**
-> "Three services alert at once. The classic nightmare: multiple failures, one root cause — somewhere."
+**3. What we built (45 s)**
+> "DevBrowser is a browser for people who build software. It's the window a developer already has open all day:
+> it browses, it inspects every request, and it carries a live map of their system, read straight from the code.
+> No diagrams to draw. When something breaks, one click walks that map to the root cause, names the change
+> behind it, and proposes a fix. A person approves it. Nothing runs on its own."
 
----
+**4. Demo (3 minutes, below)**
 
-### 0:22 – 0:32 | Start investigation
+**5. Proof (30 s)**
+> "On a public benchmark of real injected faults, RCAEval, we name the right root cause 86% of the time on a
+> 12-service system and 73% on a 69-service one. A random guess gets 8% and 1.5%. We read seven open-source
+> systems we didn't write in under a second each."
 
-**Action:** Click **"Investigate"**.
+Say the limit before they ask: *"Large systems are not solved. On the 69-service system a simple baseline comes close,
+and that is our next piece of work."*
 
-**On screen:** Agent Trail panel appears. First step: `get_active_alerts`, then `find_common_cause`.
+**6. Business (30 s)**
+> "Free for individual developers: it runs on their laptop, so a free user costs us almost nothing. Teams pay when
+> they want one shared map, roles and paging: our working price is $12 per developer per month, a hypothesis we're
+> testing with design partners. Bottom-up, like the tools developers already love."
 
-**Say:**
-> "It starts with what is on fire, then asks the graph what the alerting services have in common."
-
----
-
-### 0:32 – 1:10 | Agent walks the graph
-
-**On screen:** Steps stream in. Expand the `find_common_cause` step to show the Cypher query. The graph path glows from all three alerting services converging on `inventory-db-proxy`.
-
-**Say:**
-> "Then it asks FalkorDB: what do all three alerting services share downstream?
-> A multi-hop graph traversal — variable-length paths across 38 services — finds one shared dependency.
-> inventory-db-proxy.
-> Every step shows its exact Cypher query. No hallucination — every claim comes from the graph."
-
-*Pause one beat while the path pulses.*
-
-> "It checks memory: has the graph seen this root cause before? INC-0042 was this same proxy.
-> Then: what changed there? A deploy six minutes ago. Version 4.2.0.
-> 'Reduce max pool size to 10 to cut DB costs.' Author: Priya."
+**7. The ask (15 s)**: *fill in before Sunday: amount, what it buys (for example the pilot and the first hires), and
+the milestone it reaches.* Do not improvise this line.
 
 ---
 
-### 1:10 – 1:25 | Blast radius + chokepoints
+## The live demo (3 minutes, exact clicks)
 
-**On screen:** `get_service_context`, `blast_radius` and `critical_services` steps (skipped when memory says it is a repeat). Nodes are sized by PageRank, and dashed rings mark the top chokepoints.
+| Time | Click | Say |
+| :--- | :--- | :--- |
+| 0:00 | App is open on a **New tab** | "This is a browser. It browses. The left side is everything else it does." |
+| 0:15 | **Overview** | "This is a sample company: 38 services, 102 dependencies, read from code. All healthy." |
+| 0:30 | **System map** | "Front-ends at the top, business services, data, platform at the bottom. Bigger circles are what more of the system depends on." |
+| 0:50 | Type `inventory-db-proxy` in **Find a service**, then **Ship a bad deploy** | "I'll break production the way it usually breaks: someone ships a config change." |
+| 1:05 | Wait for the colours | "Orders and inventory go amber and start alerting. Those teams get paged. Neither of them broke anything. And this incident isn't scripted: the agent has to work it out." |
+| 1:20 | **Investigate** | "Now watch the map. Each step is a real query over the graph, and the path lights up as it goes." |
+| 1:45 | The result appears on the right (about 8 s) | "Root cause: inventory-db-proxy. It names the change that shipped minutes before the alerts and who shipped it, and says high confidence, with the reason." |
+| 2:10 | Point at **Proposed fixes** | "It proposes a rollback, a scale-up, and paging the owner. It can't do any of them. A human decides." |
+| 2:25 | **Approve** the rollback | "Approved: rolled back, and the map goes healthy again. The incident is stored in the graph, so the next similar one is recognised straight away." |
+| 2:45 | **Overview** | "Back to the overview: what changed, what's critical, what's waiting on a person. That's the product." |
 
-**Say:** (read the real numbers off the step cards; do not quote figures from memory)
-> "Blast radius counts every upstream service that breaks, by tier. PageRank and betweenness, both computed
-> inside FalkorDB, rank the proxy among all 38 services. The graph already knew this was a chokepoint."
-
----
-
-### 1:25 – 1:45 | Final report + action cards
-
-**On screen:** Markdown report with cited node IDs. Two action cards below: Rollback and Page on-call.
-
-**Say:**
-> "The agent proposes two actions and cites every claim with a node ID.
-> But it can't execute anything. A pending Action node sits in FalkorDB waiting for a human."
-
----
-
-### 1:45 – 2:00 | Approve → recovery wave
-
-**Action:** Click **Approve** on the rollback card.
-
-**On screen:** Recovery spreads outward from `inventory-db-proxy` — callers turn green in dependency order. Cost ticker freezes, shows MTTR.
-
-**Say:**
-> "I approve. The rollback runs. Recovery propagates up the graph — callers come back once nothing below them is broken.
-> The header flips to Recovered and shows the MTTR and what the outage cost."
+If something misbehaves: **Restore healthy** (top of the System map) resets the map; then start again from 0:50.
 
 ---
 
-### 2:00 – 2:20 | Memory — second run is faster
+## Questions you will get
 
-**Action:** Use `kafka-rebalance-storm`, the scenario with a measured before/after. Beforehand (off camera) inject it,
-run **Investigate** with the local Ollama model, and approve everything. On camera: inject it again → Investigate.
+**"Isn't this Datadog / an APM?"** They show each service's health. We keep the *relationships* (who depends on whom,
+what changed, who owns it) as a graph and reason over it. We can read their data; we do not replace it.
 
-**On screen:** Trail moves faster. Badge shows "Seen before: INC-… took 8 steps. This time: 6".
+**"Does it work on real code?"** Yes, and we test it on real code: 20 public repositories of every shape (microservices,
+monorepos, Android, Swift, .NET, a Python library, a repo with no code) all map correctly, each in under half a second. It
+reads Docker Compose, Kubernetes, the workspaces of npm, Gradle, Cargo, Swift, Maven and .NET, and imports in every common
+language. Show it: **Connect codebase…** on any repository on the laptop.
 
-**Say:**
-> "Now the same incident again. The agent finds the previous incident in memory — by graph traversal, not keyword search.
-> Same root cause, same fix. Measured with a local 8B model: six steps instead of eight, 47 seconds instead of 67."
+**"What about large companies?"** The graph runs embedded on one machine today, sized for one team's system. A shared
+server for a whole organisation, with sign-in and roles, is the paid Team tier and is on the roadmap.
 
----
+**"Is the AI making things up?"** By default the agent is deterministic: the same graph gives the same answer, with no
+language model. Every step is a graph query you can inspect, and every action waits for a person.
 
-### 2:20 – 2:30 | Closing
-
-**On screen:** Full green graph. Show URL.
-
-**Say:**
-> "SentinelGraph: graph-native incident response on FalkorDB.
-> Every decision traces back to a Cypher query. Every fix needs a human.
-> And it gets smarter with every incident."
-
----
-
-## Optional Bonus Clip (15 s)
-
-Press **`/`** or `Ctrl+K`, search for `secrets-vault`, click **Ship a bad deploy** in the node card.
-The agent has no script for this. Watch it work it out live from the graph.
-
-**Say:**
-> "Those were scripted scenarios. Now I'll break something random. No script. The graph figures it out."
-
----
-
-## Post-Production
-
-- [ ] Speed up the agent thinking steps 1.5×–2× in editing to hit 2:30
-- [ ] Add quiet instrumental background music
-- [ ] Text readable at 720p (zoom the Cypher trail if needed)
-- [ ] Upload YouTube **Unlisted** — test the link in incognito before pasting
+**"What haven't you proven?"** How many minutes it saves real engineers on real incidents. Our pilot measures exactly
+that; we don't quote a number until it does.

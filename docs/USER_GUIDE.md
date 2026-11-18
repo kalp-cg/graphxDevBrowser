@@ -9,8 +9,11 @@
 | **Tab strip** (top) | One tab per page. Each tab belongs to a *profile* (Default, Admin or Customer) with its own cookies and storage, shown on the tab. |
 | **Address bar** | Type an address, a search, or just a port: `3000` opens `localhost:3000`. Searches go to Google. |
 | **Toolbar buttons** (right of the address bar) | Device mode, split view, the tool panel toggle. |
-| **Tool rail** (left) | Network, API Client, Security, AI Assistant; below the divider, SentinelGraph. Settings at the bottom. |
-| **Status bar** (bottom) | Requests captured for the open site, SentinelGraph connection, local AI, memory in use, theme. |
+| **Sidebar** (left) | Grouped by what you are doing: *Your system* (Overview, System map), *Inspect this page* (Network, Console, Security, API Client), *Build* (Run, Bug Recorder, AI Assistant), *Browser* (History & bookmarks). New tab and Search at the top; SentinelGraph's status, **Guide** and Settings at the bottom. The arrow at the top collapses it to icons. |
+| **Status bar** (bottom) | The page's address, requests captured for the open site, SentinelGraph connection, theme. |
+
+**Guide** (bottom of the sidebar) explains the whole product on one page, with a *Try it* button for each journey.
+**Search** (`⌘K`) lists every action by name, grouped like the sidebar.
 
 ## Browsing
 
@@ -98,7 +101,7 @@ OAuth helpers, file uploads, importing from Postman or OpenAPI.
 
 Turn "it breaks when I click Pay" into a file a teammate can replay.
 
-1. Load the page where the bug happens and open **Bug Recorder** in the tool rail (or the command palette: *Record This Tab*).
+1. Load the page where the bug happens and open **Bug Recorder** in the sidebar (or `⌘K` → *Record a bug in this tab*).
 2. Press **Record this tab**, do what triggers the bug, press **Stop**. A red **REC** marks the status bar meanwhile.
 3. The recording opens with **What went wrong** (the first error or failing request, and what you did right before it), and a
    timeline: your actions, every request with its response, console errors, and snapshots of the page you can look at as it was.
@@ -123,10 +126,12 @@ the badges and the status-bar count follow. Press **History** to see everything 
 with the page it came from, so you can audit a site you left. A site is the address plus port: `localhost:7400` and
 `localhost:7401` are different sites.
 
-## SentinelGraph panel
+## Your system: Overview and System map
 
-Needs the SentinelGraph server (see [Getting started](GETTING_STARTED.md)). It opens as a full page, because a map
-needs the room.
+Needs SentinelGraph, which DevBrowser starts by itself when run from source (see [Getting started](GETTING_STARTED.md)).
+**Overview** is the first stop: the project, whether it is healthy, active alerts, recent changes, the most critical services
+and the fixes waiting for your approval; with an incident it offers **Investigate**. **System map** opens as a full page,
+because a map needs the room. Its controls:
 
 | Control | What it does |
 | :--- | :--- |
@@ -175,7 +180,8 @@ evidence.
 
 | Symptom | Fix |
 | :--- | :--- |
-| "SentinelGraph not connected" | The server is not running or the address is wrong. Start `./scripts/sentinelgraph.sh` and use `http://127.0.0.1:8100`. |
+| "SentinelGraph not connected" | From source, DevBrowser starts it from `backend/.venv`: run `./scripts/demo.sh` once to create that environment. Otherwise start `./scripts/sentinelgraph.sh` and connect to `http://127.0.0.1:8100`. |
+| **Connect codebase** says the folder "has no source code to map" | The folder holds no code in a language it reads and no project manifest. Pick the folder that holds the project's code. |
 | **Connect codebase** says the folder is "not a directory on the machine running the SentinelGraph API" | The server cannot see that folder. With Docker, set `PROJECTS_DIR` to a folder that contains it. |
 | The map shows one service for a monolith | The project is built from the repository root with no usable source folders. Check the folder you picked is the repository root. |
 | A page does not load | The error page names the address that failed. For a dev server, check it is running on that port. |

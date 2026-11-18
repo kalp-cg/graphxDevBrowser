@@ -44,6 +44,10 @@ Start any local web app (even `python3 -m http.server 3000`).
 
 Goal: check the map against open-source systems whose structure you can verify yourself.
 
+The quick version is automated: `make codebases` downloads 20 public repositories of every shape (microservices, single
+apps in seven languages, monorepos, Android, Swift, .NET, a library, a repository with no code) and checks each one maps
+with the structure it should have. The manual steps below let you also judge whether the connections are *right*.
+
 ```bash
 mkdir -p ~/devbrowser-test && cd ~/devbrowser-test
 git clone --depth 50 https://github.com/open-telemetry/opentelemetry-demo.git
@@ -176,22 +180,30 @@ class of fault, no one is slower by more than a minute, and the SUS score is at 
 For developers. All pass on the release build.
 
 ```bash
-cd DevBrowser && npm run typecheck && npm run lint && npm test      # unit tests
-cd backend && pytest -q                                              # backend (embedded graph, no cloud account)
+make test        # server tests (embedded graph) + app type check, lint and unit tests
+make e2e         # builds the app, starts the sandbox shop, drives the real app end to end, stops the shop
+make codebases   # "Connect codebase" on 20 real public repositories
+
+# by hand, the same:
+cd DevBrowser && npm run typecheck && npm run lint && npm test
+cd backend && pytest -q
 python sandbox/run.py up                                             # then, in another terminal:
 cd e2e && npx playwright test -c devbrowser.config.ts                # drives the real built app
 DEVBROWSER_PACKAGED=/path/to/DevBrowser npx playwright test -c devbrowser.config.ts   # ... or an installed build
 ```
 
-**Results on the release build (30 October 2026):**
+**Results on the 1.3.0 build (18 November 2026, Fedora Linux, from source):**
 
 | Suite | Result |
 | :--- | :--- |
-| App unit tests (`npm test`) | 89 passed, 2 skipped (they need a live server) |
-| Server tests (`pytest`, embedded graph), including the ground-truth benchmark | 140 passed |
-| End-to-end, from source | 25 passed |
-| End-to-end, against the app installed from the `.dmg` | 25 passed (re-run after the final build) |
-| Type check and lint (app, dashboard) | clean |
+| App unit tests (`npm test`) | 163 passed, 2 skipped (they need a live server) |
+| Server tests (`pytest`, embedded graph), including the ground-truth benchmark and every repository shape | 176 passed |
+| Codebase sandbox (`make codebases`): "Connect codebase" on 20 real public repositories | 20 of 20 mapped as expected, each under 0.5 s |
+| End-to-end, from source, the full suite on a fresh sandbox each time | 39 of 39 passed in each of the last 4 runs |
+| Type check and lint (app) | clean |
+
+Earlier, the 1.2.0 build (30 October 2026) passed 89 app unit tests, 140 server tests and 25 end-to-end tests, also against the
+app installed from the `.dmg`; 1.3.0 has not been re-tested as an installed package yet.
 
 The end-to-end suite starts the real app and drives it: it browses, opens every panel, connects a project, breaks a service,
 investigates it, restores it, and relaunches to check the session comes back.

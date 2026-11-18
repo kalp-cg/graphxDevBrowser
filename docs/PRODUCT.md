@@ -71,7 +71,7 @@ bottom-up adoption: individuals use the free product first, and teams pay when t
 | Step | What happens | Effort |
 | :--- | :--- | :--- |
 | 1 | Install DevBrowser. | One download, one drag. |
-| 2 | Start SentinelGraph on your own machine. | One command. |
+| 2 | Open it. DevBrowser starts SentinelGraph on your machine by itself. | Nothing. |
 | 3 | Pick a code repository. | One click; the scan takes **0.4 to 1.0 s** (*measured*, seven repositories). |
 | 4 | See the map: services, databases, outside APIs, connections, owners, recent changes. | Nothing to draw. |
 | 5 | When something breaks, press **Investigate**. | One click. |
@@ -98,7 +98,15 @@ monolith written by the team). Per repository: what it found, and how long it to
 | Sock Shop | Docker Compose | 9 | 5 | 1 | 0.4 s |
 | ContractAI | A Next.js monolith | 19 modules | 1 | 52 | 0.4 s |
 
-Median across the seven: **0.4 s**; slowest **1.0 s**. The numbers are the *shape* of the system as the repository
+Median across the seven: **0.4 s**; slowest **1.0 s**.
+
+**Every shape of codebase** (*measured*, November 2026, `sandbox/codebases.py`). We then scanned 20 public repositories chosen
+to cover the shapes developers actually have: Kubernetes and Compose microservices; single apps in Java, TypeScript, Python,
+Ruby, PHP, Go and Svelte; monorepos (Yarn workspaces, Cargo, Gradle with 28 Android modules); a Swift package; a .NET
+solution; a Python library; and a repository with no code at all. **20 of 20** produced a map with the expected structure
+(services or modules *and* the connections between them; the no-code repository is refused with a reason), each in **under
+half a second**. Before this work 10 of the 20 did. What it checks is that the map has the right shape, not that every
+connection is correct; the ground-truth benchmark above is where correctness is scored. The numbers are the *shape* of the system as the repository
 declares it. We checked service names and a sample of connections by hand against each project's own documentation;
 we have **not** yet measured precision and recall across a large set of systems.
 
