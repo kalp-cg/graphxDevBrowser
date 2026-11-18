@@ -29,6 +29,7 @@ actually broken, what changed, and who owns it?*
 | **Root cause, not symptoms** | Break something (or have something break) and press **Investigate**. The agent walks the graph to the shared dependency, names the change that caused it, and proposes a fix. It handles databases and several simultaneous failures, and says how sure it is. |
 | **Know the blast radius before you merge** | **Check my changes** shows which services your uncommitted work touches and what depends on them; the same check comments on pull requests in CI. |
 | **You stay in charge** | The agent can only *propose*. Nothing is rolled back, scaled or paged until you approve it. |
+| **Easy to find your way** | A labelled sidebar grouped by what you are doing, a **Guide** that explains the whole product with a *Try it* button per journey, and `⌘K` / `Ctrl+K` to search every action by name. |
 
 <p align="center">
   <img src="docs/images/app-investigation.png" alt="DevBrowser's System map: the agent's path to the root cause, inventory-db-proxy, with the change behind it and three proposed fixes waiting for approval" width="900">
@@ -38,9 +39,26 @@ actually broken, what changed, and who owns it?*
   <img src="docs/images/app-overview.png" alt="DevBrowser's Overview: three alerts firing, the services, dependencies and teams mapped, recent changes and the most critical services" width="900">
 </p>
 
+## Quick start
+
+Requirements: Node.js 20 or 22 and Python 3.12. From the repository root:
+
+```bash
+make demo     # DevBrowser + its own SentinelGraph, on a clean 38-service sample company with a live incident to investigate
+make dev      # DevBrowser on your own projects
+```
+
+The first run installs what it needs (`make setup`). DevBrowser starts SentinelGraph by itself on `127.0.0.1:8100` and stops it
+when you quit: there is no separate backend to run. The graph is embedded: no database server, no cloud account.
+
+Then, in the app: **Overview** shows your system's health and what changed. **Connect codebase…** maps your own repository.
+On the **System map**, pick a service, **Ship a bad deploy**, then **Investigate**: the agent names the root cause and the
+change behind it, and proposes fixes that wait for your approval. New here? Open **Guide** at the bottom of the sidebar.
+
 ## Install
 
-Download the installer for your system from the [latest release](../../releases/latest):
+The installers on the [latest release](../../releases/latest) are **1.2.0**; this README describes **1.3.0**, which runs from
+source (above) until the next release is published. Download the installer for your system for your system from the [latest release](../../releases/latest):
 
 | System | File |
 | :--- | :--- |
@@ -50,7 +68,7 @@ Download the installer for your system from the [latest release](../../releases/
 | Linux | `DevBrowser-<version>-linux-<arch>.AppImage` or `.deb` |
 
 A release build connects by itself to a hosted SentinelGraph demo (a sample company with real failures to investigate), so the system map
-works the first time you open it. To map **your own** code, run SentinelGraph on your machine ([below](#five-minutes-to-your-first-map)).
+works the first time you open it. To map **your own** code, run SentinelGraph on your machine ([Getting started](docs/GETTING_STARTED.md#2-run-sentinelgraph)).
 
 The installers are not code-signed, so macOS and Windows warn you once:
 
@@ -59,20 +77,6 @@ The installers are not code-signed, so macOS and Windows warn you once:
 - **Windows:** **More info > Run anyway** on the blue SmartScreen screen.
 
 More in [Getting started](docs/GETTING_STARTED.md#first-launch).
-
-## Run it: one command
-
-```bash
-./scripts/demo.sh          # the demo: a 38-service sample company, from a clean slate
-cd DevBrowser && npm run dev   # everyday use: your own connected project
-```
-
-DevBrowser starts SentinelGraph by itself (on `127.0.0.1:8100`, stopped when you quit), so there is no separate
-backend or dashboard to run. The graph is embedded: no database server, no cloud account.
-
-Then, in the app: **Overview** shows your system's health and what changed. **Connect codebase…** maps your own
-repository. On the **System map**, pick a service, **Ship a bad deploy**, then **Investigate**: the agent names the root
-cause and the change behind it, and proposes fixes that wait for your approval.
 
 ## Documentation
 
@@ -132,10 +136,11 @@ expected, each in under half a second.
 ```
 DevBrowser/   the desktop app (Electron, React, TypeScript); starts SentinelGraph itself
 backend/      SentinelGraph server (Python, FastAPI), its embedded graph engine and graph tools
-sandbox/      a small live microservice shop for trying everything on your machine
+sandbox/      a live microservice shop to try everything on (run.py), and the codebase sandbox (codebases.py)
 e2e/          end-to-end tests that drive the real, built app
 docs/         documentation
 scripts/      launchers: demo.sh (the demo), sentinelgraph.sh (the server alone)
+Makefile      every task as one command: setup, demo, dev, test, e2e, codebases
 ```
 
 ## Build from source
@@ -143,12 +148,10 @@ scripts/      launchers: demo.sh (the demo), sentinelgraph.sh (the server alone)
 ```bash
 cd DevBrowser
 npm ci
-npm run dev          # run from source (starts SentinelGraph too; ./scripts/demo.sh once creates backend/.venv)
+npm run dev          # run from source (starts SentinelGraph too; `make setup` once creates backend/.venv)
 npm test             # unit tests
 npm run dist         # installers for this OS, in DevBrowser/release/
 ```
-
-Requirements: Node.js 20 or 22, and Python 3.12 for the server.
 
 ## Licence
 
