@@ -2,10 +2,10 @@
   "name": "sentinelgraph-e2e",
   "version": "1.0.0",
   "directories": {
-    "test": "tests"
+    "test": "devbrowser"
   },
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test -c devbrowser.config.ts"
   },
   "type": "commonjs",
   "devDependencies": {
