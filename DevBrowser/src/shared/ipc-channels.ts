@@ -1,6 +1,5 @@
 export const IPC_CHANNELS = {
   // System & Window
-  SYSTEM_GET_HARDWARE_METRICS: 'devbrowser:system:getHardwareMetrics',
   SYSTEM_CHECK_OLLAMA_STATUS: 'devbrowser:system:checkOllamaStatus',
 
   // Browser Tabs & Partitions
@@ -25,7 +24,7 @@ export const IPC_CHANNELS = {
   // Local AI
   AI_EXECUTE_DIAGNOSIS: 'devbrowser:ai:executeDiagnosis',
 
-  // SentinelGraph (TigerGraph dependency graph + incident agent)
+  // SentinelGraph (dependency graph + incident agent)
   SENTINEL_CONFIGURE: 'devbrowser:sentinel:configure',
   SENTINEL_STATUS: 'devbrowser:sentinel:status',
   SENTINEL_GET_GRAPH: 'devbrowser:sentinel:getGraph',
@@ -64,13 +63,6 @@ export const IPC_CHANNELS = {
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];
 
-export interface HardwareMetrics {
-  totalUnifiedMemoryBytes: number;
-  freeUnifiedMemoryBytes: number;
-  appMemoryUsageBytes: number;
-  cpuArchitecture: string;
-  isAppleSilicon: boolean;
-}
 
 /** A browser action routed from the app menu, a page's context menu or a popup to the renderer. */
 export type BrowserCommand =

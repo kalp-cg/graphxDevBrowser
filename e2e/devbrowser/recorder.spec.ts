@@ -27,7 +27,7 @@ test.describe.configure({ mode: "serial" });
 test.beforeAll(async () => {
   await control({ action: "reset" });
   const args = process.platform === "linux" ? [APP, "--no-sandbox"] : [APP];
-  app = await electron.launch({ executablePath: electronPath, args, cwd: APP, env: { ...process.env, DEVBROWSER_USER_DATA: userData, NODE_ENV: "production", OLLAMA_HOST: "http://127.0.0.1:1" } });
+  app = await electron.launch({ executablePath: electronPath, args, cwd: APP, env: { ...process.env, DEVBROWSER_USER_DATA: userData, NODE_ENV: "production", OLLAMA_HOST: "http://127.0.0.1:1", DEVBROWSER_NO_LOCAL_SENTINEL: "1" } });
   page = await app.firstWindow();
   await page.setViewportSize({ width: 1440, height: 900 }).catch(() => undefined);
   await expect(page.getByRole("tablist", { name: "Tabs" })).toBeVisible();

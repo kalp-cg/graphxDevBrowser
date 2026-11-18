@@ -20,7 +20,7 @@ export const RunView: React.FC = () => {
 
   const running = s.status === 'running';
   return (
-    <div role="region" aria-label="Run panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, borderBottom: '1px solid var(--border-subtle)' }}>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <button className="btn" onClick={() => void s.pickFolder()} title="The folder to run in">

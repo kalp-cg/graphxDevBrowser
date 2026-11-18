@@ -28,6 +28,9 @@ const ApiClientView = view(() => import('./components/views/ApiClientView'), 'Ap
 const SecurityView = view(() => import('./components/views/SecurityView'), 'SecurityView');
 const RecorderView = view(() => import('./components/views/RecorderView'), 'RecorderView');
 const DependencyView = view(() => import('./components/views/DependencyView'), 'DependencyView');
+const OverviewView = view(() => import('./components/views/OverviewView'), 'OverviewView');
+const LibraryView = view(() => import('./components/views/LibraryView'), 'LibraryView');
+const GuideView = view(() => import('./components/views/GuideView'), 'GuideView');
 const AIAssistantView = view(() => import('./components/views/AIAssistantView'), 'AIAssistantView');
 const SettingsView = view(() => import('./components/views/SettingsView'), 'SettingsView');
 
@@ -72,7 +75,10 @@ const PANELS: Record<string, React.ComponentType> = {
   apiClient: ApiClientView,
   security: SecurityView,
   recorder: RecorderView,
+  overview: OverviewView,
   dependencies: DependencyView,
+  library: LibraryView,
+  guide: GuideView,
   ai: AIAssistantView,
   settings: SettingsView
 };
@@ -87,19 +93,14 @@ export const App: React.FC = () => {
     const app = useAppStore.getState();
     let unsubscribeNetwork: (() => void) | undefined;
     let unsubscribeCommands: (() => void) | undefined;
-    let metricsInterval: ReturnType<typeof setInterval> | undefined;
     let stopWatch: (() => void) | undefined;
     let stopRun: (() => void) | undefined;
     let stopMocks: (() => void) | undefined;
 
     if (window.devBrowserAPI) {
-      window.devBrowserAPI.system.getHardwareMetrics().then(app.setHardwareMetrics).catch(console.error);
       app.checkOllama();
       // Reconnect to SentinelGraph if it was configured on an earlier launch (token stays in the main process)
       app.restoreSentinel().catch(console.error);
-      metricsInterval = setInterval(() => {
-        window.devBrowserAPI?.system.getHardwareMetrics().then(useAppStore.getState().setHardwareMetrics).catch(console.error);
-      }, 8000);
 
       unsubscribeNetwork = window.devBrowserAPI.network.onStreamTransaction(tx => {
         useAppStore.getState().addTransaction(tx);
@@ -130,7 +131,6 @@ export const App: React.FC = () => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => {
-      if (metricsInterval) clearInterval(metricsInterval);
       unsubscribeNetwork?.();
       unsubscribeCommands?.();
       stopWatch?.();
@@ -142,12 +142,12 @@ export const App: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden',
-      background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
+      background: 'var(--bg-chrome)', color: 'var(--text-primary)' }}>
       <TabStrip />
       <Toolbar />
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         <Sidebar />
-        <main style={{ flex: 1, minWidth: 0, display: 'flex' }}>
+        <main style={{ flex: 1, minWidth: 0, display: 'flex', gap: 8, padding: '0 8px 0 0' }}>
           <BrowserArea hidden={!!Panel && (panelMaximized || narrow || FULL_PAGE_VIEWS.has(activeView))} />
           {Panel && (
             <ToolDock>

@@ -45,7 +45,7 @@ export const RecorderView: React.FC = () => {
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, borderBottom: '1px solid var(--border-subtle)' }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {status === 'recording' ? (
-            <button className="btn danger" aria-label="Stop recording" onClick={() => void stopRecording()}>
+            <button className="btn danger" aria-label="Stop recording" onClick={() => void stopRecording()} style={{ fontVariantNumeric: 'tabular-nums' }}>
               <Square size={13} fill="currentColor" /> Stop · {clock(now - startedAt)}
             </button>
           ) : (

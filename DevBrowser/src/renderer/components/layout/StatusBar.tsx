@@ -7,8 +7,6 @@ import { stopRecording } from '../../browser/recorder';
 import { activeCount, useMockStore } from '../../store/useMockStore';
 import { forSite } from '../../../shared/domain/browser';
 
-const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-
 const Dot: React.FC<{ tone: 'ok' | 'warn' | 'off' }> = ({ tone }) => (
   <span style={{ width: 7, height: 7, borderRadius: 4, flexShrink: 0,
     background: tone === 'ok' ? 'var(--accent)' : tone === 'warn' ? 'var(--warn)' : 'var(--text-muted)' }} />
@@ -20,7 +18,6 @@ export const StatusBar: React.FC = () => {
   const sentinel = useAppStore(s => s.sentinelStatus);
   const sentinelUrl = useAppStore(s => s.sentinelUrl);
   const ollama = useAppStore(s => s.ollamaStatus);
-  const metrics = useAppStore(s => s.hardwareMetrics);
   const currentUrl = useAppStore(s => s.currentUrl);
   const requests = useAppStore(s => forSite(s.transactions, currentUrl).length);
   const theme = useAppStore(s => s.theme);
@@ -33,7 +30,7 @@ export const StatusBar: React.FC = () => {
 
   return (
     <footer style={{ display: 'flex', alignItems: 'center', gap: 16, height: 24, padding: '0 12px', flexShrink: 0,
-      fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg-primary)', borderTop: '1px solid var(--border-subtle)' }}>
+      fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg-chrome)' }}>
       <span style={{ ...item, minWidth: 0, flex: 1, overflow: 'hidden' }}>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {tab?.error ? `Failed: ${tab.error.description}` : tab?.loading ? `Loading ${tab.url}` : tab?.url === 'about:blank' ? '' : tab?.url}
@@ -52,19 +49,16 @@ export const StatusBar: React.FC = () => {
           ● REC
         </button>
       )}
-      <span style={item}>{requests} requests captured</span>
-      <button onClick={() => setActiveView('settings')} title={sentinel === 'connected' ? sentinelUrl : 'Connect in Settings'}
+      {requests > 0 && <span style={item}>{requests} requests captured</span>}
+      <button onClick={() => setActiveView(sentinel === 'connected' ? 'overview' : 'settings')} title={sentinel === 'connected' ? sentinelUrl : 'Connect in Settings'}
         style={{ ...item, border: 0, background: 'none', color: 'inherit', font: 'inherit', cursor: 'pointer' }}>
         <Dot tone={sentinel === 'connected' ? 'ok' : sentinel === 'connecting' ? 'warn' : 'off'} />
-        SentinelGraph {sentinel === 'connected' ? 'connected' : sentinel === 'connecting' ? 'connecting' : 'not connected'}
+        SentinelGraph {sentinel === 'connected' ? 'connected' : sentinel === 'connecting' ? 'starting' : 'not connected'}
       </button>
-      <span style={item} title={ollama.message}>
-        <Dot tone={ollama.ok ? 'ok' : 'off'} />
-        Local AI {ollama.ok ? ollama.model : 'offline'}
-      </span>
-      {metrics && (
-        <span style={item} title="Memory used by every DevBrowser process (UI and pages)">
-          {gb(metrics.appMemoryUsageBytes)} used
+      {ollama.ok && (
+        <span style={item} title={ollama.message}>
+          <Dot tone="ok" />
+          Local AI {ollama.model}
         </span>
       )}
       <button onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}

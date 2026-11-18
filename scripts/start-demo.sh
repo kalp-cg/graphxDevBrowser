@@ -19,4 +19,4 @@ for i in $(seq 1 60); do
   sleep 1
 done
 echo "API :8100 -> $a   sandbox API :8200 -> $b   shop control :7499 -> $c   (logs in .sentinel-logs/)"
-echo "DevBrowser: cd DevBrowser && npm run dev     "
+echo "DevBrowser: cd DevBrowser && npm run dev   (it connects to :8100 by itself)"

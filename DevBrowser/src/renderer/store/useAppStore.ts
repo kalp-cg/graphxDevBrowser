@@ -17,10 +17,9 @@ import {
   type SentinelResolution,
   type SentinelSnapshot
 } from '../../shared/domain/sentinel';
-import type { HardwareMetrics } from '../../shared/ipc-channels';
 import { useBrowserStore } from './useBrowserStore';
 
-export type NavigationView = 'browser' | 'run' | 'console' | 'network' | 'apiClient' | 'security' | 'recorder' | 'dependencies' | 'ai' | 'settings';
+export type NavigationView = 'browser' | 'overview' | 'library' | 'guide' | 'run' | 'console' | 'network' | 'apiClient' | 'security' | 'recorder' | 'dependencies' | 'ai' | 'settings';
 export type ThemeMode = 'dark' | 'light';
 
 export interface ToastMessage {
@@ -113,7 +112,6 @@ interface AppState {
   tigerGraphStatus: 'disconnected' | 'connected' | 'connecting';
   tigerGraphProviderType: 'tgcloud' | 'local';
   tigerGraphName: string;
-  tigerGraphMode: 'tigergraph-only' | 'hybrid';
   activeGraphTab: 'topology' | 'graphstudio' | 'console';
   gsqlQuery: string;
   gsqlResult: unknown | null;
@@ -122,7 +120,7 @@ interface AppState {
   setActiveGraphTab: (tab: 'topology' | 'graphstudio' | 'console') => void;
   setGsqlQuery: (query: string) => void;
   calculateBlastRadiusForNode: (nodeId: string) => void;
-  // SentinelGraph: the live TigerGraph dependency graph (replaces the sample graph once connected)
+  // SentinelGraph: the live dependency graph (replaces the sample graph once connected)
   sentinelUrl: string;
   sentinelStatus: 'disconnected' | 'connecting' | 'connected';
   sentinelMessage: string;
@@ -137,6 +135,8 @@ interface AppState {
   sentinelImpact: ImpactResult | null;
   /** Address -> service, from the last scan: matches what you browse to the map. */
   sentinelAliases: Record<string, string>;
+  /** The connected repository's name; null while the graph holds the sample company (demo data). */
+  sentinelProject: string | null;
   checkImpact: () => Promise<void>;
   clearImpact: () => void;
   /** Demo: back to a healthy system. */
@@ -171,8 +171,6 @@ interface AppState {
   setCommandPaletteOpen: (open: boolean) => void;
   shortcutsModalOpen: boolean;
   setShortcutsModalOpen: (open: boolean) => void;
-  hardwareMetrics: HardwareMetrics | null;
-  setHardwareMetrics: (metrics: HardwareMetrics | null) => void;
   toasts: ToastMessage[];
   addToast: (toast: Omit<ToastMessage, 'id'>) => void;
   removeToast: (id: string) => void;
@@ -363,7 +361,6 @@ export const useAppStore = create<AppState>((set, get) => {
     tigerGraphStatus: 'disconnected',
     tigerGraphProviderType: 'tgcloud',
     tigerGraphName: 'MyGraph',
-    tigerGraphMode: 'hybrid',
     activeGraphTab: 'topology',
     gsqlQuery: '/restpp/graph/MyGraph/vertices/Service',
     gsqlResult: null,
@@ -396,16 +393,18 @@ export const useAppStore = create<AppState>((set, get) => {
       try {
         const r = await window.devBrowserAPI.sentinel.scanCodebase();
         if (!r) return; // dialog cancelled
+        const parts = r.source.includes('+') ? 'modules' : 'services'; // one app's insides, or separate deployables
         get().addToast({ type: 'success', title: `Mapped ${r.repo}`,
-          message: `${r.services} services, ${r.databases} databases, ${r.dependencies} dependencies, ${r.teams} teams (from ${r.source}).${r.replaced ? ' Replaced the previous map.' : ''}` });
+          message: `${r.services} ${parts}, ${r.dependencies} connections, ${r.databases} databases, ${r.teams} teams (from ${r.source}).${r.replaced ? ' Replaced the previous map.' : ''}` });
         await get().refreshSentinelGraph();
       } catch (err) {
-        get().addToast({ type: 'warning', title: 'Could not scan the codebase',
-          message: err instanceof Error ? err.message : String(err) });
+        get().addToast({ type: 'warning', title: 'Could not map this folder',
+          message: err instanceof Error ? err.message.replace(/^SentinelGraph [A-Z]+ \S+: HTTP \d+ /, '') : String(err) });
       }
     },
     sentinelImpact: null,
     sentinelAliases: {},
+    sentinelProject: null,
     clearImpact: () => set({ sentinelImpact: null }),
     checkImpact: async () => {
       if (!window.devBrowserAPI || get().sentinelStatus !== 'connected') return;
@@ -446,8 +445,12 @@ export const useAppStore = create<AppState>((set, get) => {
     },
     restoreSentinel: async (attempt = 0) => {
       if (!window.devBrowserAPI) return;
+      if (attempt === 0) set({ sentinelStatus: 'connecting', sentinelMessage: 'Starting SentinelGraph…' });
       const saved = await window.devBrowserAPI.sentinel.restore();
-      if (!saved) return; // never configured: stay on the labelled sample graph
+      if (!saved) { // nothing to connect to: browsing works as usual, SentinelGraph waits to be connected
+        set({ sentinelStatus: 'disconnected', sentinelMessage: 'Not connected' });
+        return;
+      }
       set({ sentinelUrl: saved.url, sentinelStatus: saved.status.ok ? 'connected' : 'disconnected',
         sentinelMessage: saved.status.message });
       if (saved.status.ok) {
@@ -462,7 +465,7 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!window.devBrowserAPI || get().sentinelStatus !== 'connected') return;
       try {
         const snapshot = await window.devBrowserAPI.sentinel.getGraph();
-        window.devBrowserAPI.sentinel.aliases().then(sentinelAliases => set({ sentinelAliases })).catch(() => undefined);
+        window.devBrowserAPI.sentinel.workspace().then(w => set({ sentinelAliases: w.aliases, sentinelProject: w.repo })).catch(() => undefined);
         const { nodes, edges } = toDevBrowserGraph(snapshot);
         set(state => ({
           sentinelSnapshot: snapshot,
@@ -550,13 +553,13 @@ export const useAppStore = create<AppState>((set, get) => {
     calculateBlastRadiusForNode: (nodeId) => {
       const node = get().graphNodes.find(n => n.id === nodeId);
       if (get().sentinelStatus === 'connected' && window.devBrowserAPI && node && (node.type !== 'Database' || node.id.startsWith('svc:'))) {
-        // A real traversal in TigerGraph (GSQL, up to 6 hops), not just the direct neighbours.
+        // A real graph traversal (up to 6 hops), not just the direct neighbours.
         window.devBrowserAPI.sentinel.blastRadius(node.name).then(res => {
           const blastRadius = toBlastRadius(nodeId, res, get().graphNodes);
           set({ blastRadius });
           get().addToast({
             type: 'warning',
-            title: 'Blast Radius (TigerGraph)',
+            title: 'Blast radius',
             message: `${blastRadius.affectedNodes.length} upstream services break if ${node.name} fails`
           });
         }).catch(err => get().addToast({
@@ -573,14 +576,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     // AI
-    aiMessages: [
-      {
-        id: 'msg-1',
-        sender: 'assistant',
-        text: 'The local assistant is ready. It runs on this machine through Ollama: what you type and what you select stays here.',
-        timestamp: Date.now() - 60000
-      }
-    ],
+    aiMessages: [],
     isAiGenerating: false,
     ollamaStatus: { ok: false, model: 'checking...' },
     sendAiPrompt: async (promptText) => {
@@ -670,8 +666,6 @@ export const useAppStore = create<AppState>((set, get) => {
     setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
     shortcutsModalOpen: false,
     setShortcutsModalOpen: (shortcutsModalOpen) => set({ shortcutsModalOpen }),
-    hardwareMetrics: null,
-    setHardwareMetrics: (hardwareMetrics) => set({ hardwareMetrics }),
     toasts: [],
     addToast: (toast) => {
       const id = `toast-${Date.now()}-${Math.random()}`;

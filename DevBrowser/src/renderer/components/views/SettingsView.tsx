@@ -265,7 +265,7 @@ export const SettingsView: React.FC = () => {
                 </p>
               </div>
 
-              {/* SentinelGraph Card: the TigerGraph dependency graph + incident agent */}
+              {/* SentinelGraph Card: the dependency graph + incident agent */}
               <div style={{
                 background: 'var(--bg-secondary)',
                 border: '1px solid var(--border-medium)',
@@ -279,19 +279,20 @@ export const SettingsView: React.FC = () => {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <Share2 size={18} color="var(--accent-emerald)" />
                     <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                      SentinelGraph (TigerGraph Dependency Graph)
+                      SentinelGraph
                     </span>
                   </div>
                   <Badge
-                    label={sentinelStatus === 'connected' ? 'Connected' : sentinelStatus === 'connecting' ? 'Connecting' : 'Disconnected (Sample Graph)'}
+                    label={sentinelStatus === 'connected' ? 'Connected' : sentinelStatus === 'connecting' ? 'Starting' : 'Not connected'}
                     variant={sentinelStatus === 'connected' ? 'success' : 'warning'}
                   />
                 </div>
 
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                  Loads the live service graph from a SentinelGraph API (backed by TigerGraph) and sends it the API calls
-                  pages make in the browser, so the graph shows what your app really calls. Blast radius runs as a GSQL
-                  traversal. TigerGraph credentials stay on the SentinelGraph server.
+                  SentinelGraph keeps the map of your system and finds root causes. Run from source, DevBrowser starts it on
+                  this machine (http://127.0.0.1:8100) and connects to it by itself. Enter another address only to use a
+                  server you run elsewhere, such as the sandbox shop's (http://localhost:8200). The API calls pages make are
+                  sent to it, without query strings, so the map shows what your app really calls.
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '8px' }}>

@@ -127,7 +127,7 @@ export const NetworkView: React.FC = () => {
         background: 'var(--bg-secondary)',
         gap: '8px'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px', flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px', flex: '1 1 340px' }}>
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -136,8 +136,10 @@ export const NetworkView: React.FC = () => {
             borderRadius: '6px',
             padding: '3px 8px',
             gap: '6px',
-            maxWidth: '320px',
-            width: '100%'
+            flex: '1 1 200px',
+            minWidth: 160,
+            maxWidth: 340,
+            height: 28
           }}>
             <Search size={13} color="var(--text-muted)" />
             <input
@@ -145,8 +147,11 @@ export const NetworkView: React.FC = () => {
               value={networkSearchQuery}
               onChange={e => setNetworkSearchQuery(e.target.value)}
               placeholder="Filter by URL or method..."
+              aria-label="Filter requests"
               style={{
                 flex: 1,
+                minWidth: 0,
+                width: '100%',
                 background: 'transparent',
                 border: 'none',
                 color: 'var(--text-primary)',

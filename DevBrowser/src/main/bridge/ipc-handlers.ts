@@ -1,6 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, net, session } from 'electron';
-import os from 'node:os';
-import { IPC_CHANNELS, type HardwareMetrics } from '../../shared/ipc-channels';
+import { IPC_CHANNELS } from '../../shared/ipc-channels';
 import type { PartitionManager } from '../session/partition-manager';
 import { PROFILES, type BrowserTab } from '../../shared/domain/browser';
 import type { SecurityFinding } from '../../shared/domain/security';
@@ -54,7 +53,9 @@ export function registerIpcHandlers(
   ollamaClient: OllamaClient,
   credentialVault: CredentialVault,
   securityAuditor: PassiveSecurityAuditor,
-  sentinelClient: SentinelGraphClient
+  sentinelClient: SentinelGraphClient,
+  /** The SentinelGraph server this app started itself (from a checkout), once it is up; null if there is none. */
+  localSentinel: Promise<string | null> = Promise.resolve(null)
 ): void {
   if (handlersRegistered) {
     return;
@@ -87,22 +88,6 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.RUN_KILL_PID, async (_event, args: { pid: number }) => killPid(Number(args.pid)));
   ipcMain.handle(IPC_CHANNELS.BROWSER_SCAN_PORTS, async () => scanPorts());
 
-  // 1. Hardware metrics
-  ipcMain.handle(IPC_CHANNELS.SYSTEM_GET_HARDWARE_METRICS, async (): Promise<HardwareMetrics> => {
-    const totalMem = os.totalmem();
-    const freeMem = os.freemem();
-    // Every process of the app: main, UI renderer, GPU and each page. workingSetSize is in KB.
-    const processMem = app.getAppMetrics().reduce((sum, m) => sum + m.memory.workingSetSize * 1024, 0);
-
-    return {
-      totalUnifiedMemoryBytes: totalMem,
-      freeUnifiedMemoryBytes: freeMem,
-      appMemoryUsageBytes: processMem,
-      cpuArchitecture: os.arch(),
-      isAppleSilicon: os.arch() === 'arm64' && os.platform() === 'darwin'
-    };
-  });
-
   // 2. Ollama live health check
   ipcMain.handle(IPC_CHANNELS.SYSTEM_CHECK_OLLAMA_STATUS, async () => {
     const health = await ollamaClient.checkHealth();
@@ -115,7 +100,7 @@ export function registerIpcHandlers(
     };
   });
 
-  // 5. SentinelGraph: the TigerGraph-backed dependency graph.
+  // 5. SentinelGraph: the dependency graph.
   ipcMain.handle(IPC_CHANNELS.SENTINEL_CONFIGURE, async (_event, args: { baseUrl: string }) => {
     sentinelClient.configure(args.baseUrl);
     return sentinelClient.status();
@@ -140,11 +125,14 @@ export function registerIpcHandlers(
   // Reconnect with the saved connection: the URL comes back, the token never leaves the main process.
   ipcMain.handle(IPC_CHANNELS.SENTINEL_RESTORE, async () => {
     if (!sentinelClient.restore()) {
-      // Never connected on this machine: an installer may ship with a hosted demo backend. It is used for the session, not saved.
-      let shipped: string | null = null;
-      try { shipped = parseDefaultBackend(fs.readFileSync(path.join(app.getAppPath(), 'default-backend.json'), 'utf8')); } catch { /* none shipped */ }
-      if (!shipped) return null;
-      sentinelClient.attach(shipped);
+      // Never connected on this machine: use the server the app started itself, else the hosted demo an installer
+      // may ship with. Either is used for the session, not saved.
+      let fallback = await localSentinel;
+      if (!fallback) {
+        try { fallback = parseDefaultBackend(fs.readFileSync(path.join(app.getAppPath(), 'default-backend.json'), 'utf8')); } catch { /* none shipped */ }
+      }
+      if (!fallback) return null;
+      sentinelClient.attach(fallback);
     }
     return { url: sentinelClient.url, status: await sentinelClient.status() };
   });
@@ -168,7 +156,7 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.SENTINEL_BREAK_SERVICE, async (_event, args: { service: string; kind: ChaosKind; additive?: boolean }) =>
     sentinelClient.breakService(args.service, args.kind, args.additive));
 
-  ipcMain.handle(IPC_CHANNELS.SENTINEL_ALIASES, async () => sentinelClient.aliases());
+  ipcMain.handle(IPC_CHANNELS.SENTINEL_ALIASES, async () => sentinelClient.workspace());
 
   // Is anything answering at this origin? Any HTTP response counts (a 500 is a server with a bug, not one that is gone).
   ipcMain.handle(IPC_CHANNELS.BROWSER_PROBE, async (_event, args: { origin: string }): Promise<{ up: boolean }> => {

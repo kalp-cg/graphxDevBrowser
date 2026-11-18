@@ -98,30 +98,34 @@ export const InvestigationPanel: React.FC = () => {
     setBusy(null);
   };
 
+  const steps = (
+    <ol style={{ margin: '6px 0 0', paddingLeft: '18px', fontSize: '12px', lineHeight: 1.45,
+      display: 'flex', flexDirection: 'column', gap: '3px' }}>
+      {run.steps.map((s, i) => (
+        <li key={i} style={{ color: s.error ? 'var(--accent-rose)' : undefined }}>
+          <strong>{s.name.replace(/_/g, ' ')}</strong> {s.summary}
+        </li>
+      ))}
+    </ol>
+  );
+
+  // Conclusion first: what broke and how sure, then what to do about it, then how the agent got there.
   return (
     <div style={card}>
       <div style={{ ...label, display: 'flex', alignItems: 'center', gap: '6px' }}>
         {run.phase === 'running' ? <Loader2 size={12} className="animate-spin" /> : <ShieldAlert size={12} />}
         INVESTIGATION {run.phase === 'running' ? 'RUNNING' : run.phase === 'done' ? `DONE${run.seconds ? ` IN ${run.seconds}s` : ''}` : 'FAILED'}
       </div>
-      <ol style={{ margin: '0 0 8px', paddingLeft: '18px', fontSize: '12px', lineHeight: 1.45,
-        display: 'flex', flexDirection: 'column', gap: '3px' }}>
-        {run.steps.map((s, i) => (
-          <li key={i} style={{ color: s.error ? 'var(--accent-rose)' : undefined }}>
-            <strong>{s.name}</strong> {s.summary}
-          </li>
-        ))}
-      </ol>
       {run.rootCauses.length > 1 ? (
-        <div style={{ marginBottom: '8px' }}>
+        <div style={{ marginBottom: '8px', fontSize: 14 }}>
           {run.rootCauses.length} separate failures:{' '}
           {run.rootCauses.map((c, i) => (
-            <React.Fragment key={c}>{i > 0 && ', '}<strong style={{ color: 'var(--text-primary)' }}>{c}</strong></React.Fragment>
+            <React.Fragment key={c}>{i > 0 && ', '}<strong style={{ color: 'var(--danger)' }}>{c}</strong></React.Fragment>
           ))}
         </div>
       ) : run.rootCause && (
-        <div style={{ marginBottom: '8px' }}>
-          Root cause: <strong style={{ color: 'var(--text-primary)' }}>{run.rootCause}</strong>
+        <div style={{ marginBottom: '8px', fontSize: 14 }}>
+          Root cause: <strong style={{ color: 'var(--danger)' }}>{run.rootCause}</strong>
         </div>
       )}
       {run.confidence && (
@@ -137,12 +141,14 @@ export const InvestigationPanel: React.FC = () => {
       {run.phase === 'done' && !run.rootCause && run.report && (
         <div style={{ color: 'var(--text-primary)', lineHeight: 1.5 }}>{run.report.replace(/\*\*/g, '')}</div>
       )}
+      {run.proposed.length > 0 && <div style={{ ...label, marginTop: 4 }}>PROPOSED FIXES · NOTHING RUNS UNTIL YOU APPROVE</div>}
       {run.proposed.map(a => (
         <div key={a.uid} role="group" aria-label={`${a.kind} on ${a.target}`}
           style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px 0',
           borderTop: '1px solid var(--border-subtle)' }}>
           <div style={{ minWidth: 0 }}>
-            <strong>{a.kind}</strong> on {a.target} <span style={{ color: 'var(--text-muted)' }}>({a.risk} risk)</span>
+            <strong>{ACTION_NAMES[a.kind] ?? a.kind.replace(/_/g, ' ')}</strong> {a.target}{' '}
+            <span style={{ color: RISK_TONE[a.risk ?? ''] ?? 'var(--text-muted)' }}>({a.risk} risk)</span>
             {a.reason && <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{a.reason}</div>}
             {a.outcome && <div style={{ fontSize: '11px' }}>{a.outcome}</div>}
           </div>
@@ -160,9 +166,17 @@ export const InvestigationPanel: React.FC = () => {
           )}
         </div>
       ))}
+      {run.phase === 'running' ? steps : run.steps.length > 0 && (
+        <details style={{ marginTop: 6, fontSize: 12 }}>
+          <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)' }}>How it got there ({run.steps.length} graph queries)</summary>
+          {steps}
+        </details>
+      )}
     </div>
   );
 };
+
+const ACTION_NAMES: Record<string, string> = { rollback: 'Roll back', scale_up: 'Scale up', page_oncall: 'Page on-call for', restart: 'Restart' };
 
 const RISK_TONE: Record<string, string> = { none: 'var(--text-muted)', low: 'var(--accent)', medium: 'var(--warn)', high: 'var(--danger)' };
 

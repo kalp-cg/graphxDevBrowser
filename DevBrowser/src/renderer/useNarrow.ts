@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 export const NARROW_PX = 900;
 
 /** Views that are a place of their own (like chrome://settings), not a tool docked beside the page. */
-export const FULL_PAGE_VIEWS: ReadonlySet<string> = new Set(['dependencies', 'settings']);
+export const FULL_PAGE_VIEWS: ReadonlySet<string> = new Set(['overview', 'dependencies', 'library', 'guide', 'settings']);
 
 export function useNarrow(): boolean {
   const [narrow, setNarrow] = useState(() => window.innerWidth < NARROW_PX);

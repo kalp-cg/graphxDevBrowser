@@ -38,6 +38,8 @@ export class SentinelGraphClient {
   private buffer: BrowserTrafficRecord[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
   private resolved = new Map<string, { at: number; value: Promise<SentinelResolution> }>();
+  /** Bumped whenever the map is replaced (another codebase, the sandbox company): traffic captured before belongs to the old map. */
+  private generation = 0;
 
   constructor(
     private readonly fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
@@ -85,13 +87,14 @@ export class SentinelGraphClient {
   public async status(): Promise<SentinelStatus> {
     if (!this.isConfigured()) return { ok: false, message: 'SentinelGraph API URL is not set' };
     try {
-      const h = await this.request<{ tigergraph: { ok: boolean; services?: number; error?: string }; graph: string;
-        backend?: string }>('GET', '/api/health');
-      const engine = h.backend === 'local' ? 'local graph' : 'TigerGraph graph';
-      return h.tigergraph.ok
-        ? { ok: true, message: `Connected to SentinelGraph (${engine} ${h.graph}, ${h.tigergraph.services ?? 0} services)`,
-            graph: h.graph, services: h.tigergraph.services }
-        : { ok: false, message: `SentinelGraph is up but its ${engine} is not: ${h.tigergraph.error ?? 'unknown'}` };
+      type Db = { ok: boolean; services?: number; error?: string };
+      // `tigergraph` is the same field from servers older than 1.3.
+      const h = await this.request<{ db?: Db; tigergraph?: Db; graph: string }>('GET', '/api/health');
+      const db = h.db ?? h.tigergraph ?? { ok: false, error: 'no graph status in the health check' };
+      return db.ok
+        ? { ok: true, message: `Connected to SentinelGraph (graph ${h.graph}, ${db.services ?? 0} services)`,
+            graph: h.graph, services: db.services }
+        : { ok: false, message: `SentinelGraph is up but its graph is not: ${db.error ?? 'unknown'}` };
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
     }
@@ -130,8 +133,15 @@ export class SentinelGraphClient {
 
   /** Map a repository on the API's machine into the graph: services, dependencies, owners, addresses. */
   public scanCodebase(path: string): Promise<CodebaseScanResult> {
-    this.resolved.clear(); // new addresses change what a URL resolves to
+    this.newMap();
     return this.request('POST', '/api/workspace/scan', { path });
+  }
+
+  /** Requests captured so far describe the system on the old map; they must not land on the new one. */
+  private newMap(): void {
+    this.buffer = [];
+    this.generation += 1;
+    this.resolved.clear(); // new addresses change what a URL resolves to
   }
 
   /** Simulate a failure in the graph (nothing real is touched): the service goes down or degraded and its callers alert. */
@@ -141,8 +151,10 @@ export class SentinelGraphClient {
   }
 
   /** The addresses each service answers on, from the last codebase scan. */
-  public async aliases(): Promise<Record<string, string>> {
-    return (await this.request<{ aliases?: Record<string, string> }>('GET', '/api/workspace')).aliases ?? {};
+  /** The connected project (`repo` is absent while the graph holds the seeded sample company) and its addresses. */
+  public async workspace(): Promise<{ repo: string | null; aliases: Record<string, string> }> {
+    const w = await this.request<{ repo?: string; aliases?: Record<string, string> }>('GET', '/api/workspace');
+    return { repo: w.repo ?? null, aliases: w.aliases ?? {} };
   }
 
   /** Which services the connected project's uncommitted changes (or the branch since `base`) touch, and what depends on them. */
@@ -164,7 +176,7 @@ export class SentinelGraphClient {
   /** The sandbox company and its exam: read the state, load the company, start or cancel a test. */
   public sandbox(a: SandboxAction): Promise<SandboxState | unknown> {
     switch (a.action) {
-      case 'load': return this.request('POST', '/api/sandbox/load');
+      case 'load': this.newMap(); return this.request('POST', '/api/sandbox/load');
       case 'test': return this.request('POST', '/api/sandbox/test', { provider: a.provider, cases: a.cases ?? 12 });
       case 'cancel': return this.request('DELETE', '/api/sandbox/test');
       default: return this.request('GET', '/api/sandbox');
@@ -199,13 +211,14 @@ export class SentinelGraphClient {
   public async flush(): Promise<boolean> {
     if (!this.isConfigured() || this.buffer.length === 0) return true;
     const batch = this.buffer;
+    const generation = this.generation;
     this.buffer = [];
     try {
       await this.request('POST', '/api/browser-traffic', batch);
       return true;
     } catch (err) {
       console.warn('[SentinelGraph] could not send traffic, will retry:', err instanceof Error ? err.message : err);
-      this.buffer = [...batch, ...this.buffer].slice(-MAX_BUFFER);
+      if (generation === this.generation) this.buffer = [...batch, ...this.buffer].slice(-MAX_BUFFER); // else: the map changed meanwhile
       return false;
     }
   }

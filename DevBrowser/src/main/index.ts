@@ -13,6 +13,7 @@ import { CDPNetworkInterceptor } from './network/cdp-interceptor';
 import { MockEngine } from './network/mock-engine';
 import { MOCK_HEADER, MockStateSchema } from '../shared/domain/mock';
 import { SentinelGraphClient } from './integrations/sentinel-client';
+import { startLocalSentinel, stopLocalSentinel } from './integrations/sentinel-server';
 import { toTrafficRecord } from '../shared/domain/sentinel';
 import { IPC_CHANNELS, type BrowserCommand, type EmulatedDevice } from '../shared/ipc-channels';
 import { emulateDevice, installAppMenu, setupGuest, throttleNetwork } from './browser/chrome';
@@ -70,13 +71,16 @@ async function createWindow(): Promise<BrowserWindow> {
     title: 'DevBrowser',
     icon: path.join(__dirname, '../build/icon.png'),
     titleBarStyle: 'hiddenInset',
-    backgroundColor: '#0f172a', // Slate 900
+    backgroundColor: '#111214', // --bg-primary, so the window never flashes another colour while loading
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
-      webviewTag: true
+      webviewTag: true,
+      // The interface keeps watching while you work in your editor: a dev server that dies, an investigation that ends.
+      // Only this window's own light checks are affected; pages in tabs are throttled as usual.
+      backgroundThrottling: false
     }
   });
 
@@ -198,7 +202,11 @@ app.whenReady().then(async () => {
     if (!parsed.success) return { ok: false, active: 0, error: parsed.error.issues[0]?.message ?? 'invalid rules' };
     return { ok: true, active: mockEngine.setState(parsed.data) };
   });
-  registerIpcHandlers(partitionManager, ollamaClient, credentialVault, securityAuditor, sentinelClient);
+  // From a checkout, the app brings its own SentinelGraph server: one command runs the whole product.
+  // DEVBROWSER_NO_LOCAL_SENTINEL=1 leaves it out (the end-to-end tests connect to the sandbox's server themselves).
+  const localSentinel = app.isPackaged || process.env.DEVBROWSER_NO_LOCAL_SENTINEL === '1'
+    ? Promise.resolve(null) : startLocalSentinel(app.getAppPath());
+  registerIpcHandlers(partitionManager, ollamaClient, credentialVault, securityAuditor, sentinelClient, localSentinel);
 
   await createWindow();
 });
@@ -220,5 +228,6 @@ app.on('child-process-gone', (_event, details) => log('error', `${details.type} 
 app.on('before-quit', () => {
   log('info', 'shutting down');
   sentinelClient?.dispose();
+  stopLocalSentinel();
   runner?.stopAll();   // a dev server started from here must not outlive the app
 });

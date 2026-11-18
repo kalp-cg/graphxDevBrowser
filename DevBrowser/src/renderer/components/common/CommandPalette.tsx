@@ -1,20 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Search, 
-  Globe, 
-  Network, 
-  Send, 
-  ShieldAlert, 
-  Share2, 
-  Bot, 
-  Settings, 
-  Plus, 
-  Trash2, 
-  Sun, 
-  Moon, 
-  HelpCircle,
-  Flame,
-  CircleDot
+import {
+  BookOpen, Bot, CircleDot, Flame, FolderGit2, GitCompareArrows, Globe, HelpCircle, History, LayoutDashboard, Moon, Network,
+  Play, Plus, Search, Send, Settings, Share2, ShieldAlert, Sun, Terminal, Trash2
 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { useBrowserStore } from '../../store/useBrowserStore';
@@ -23,7 +10,7 @@ import { startRecording, stopRecording } from '../../browser/recorder';
 
 interface CommandItem {
   id: string;
-  category: 'Navigation' | 'Actions' | 'Workspace';
+  category: 'Your system' | 'Inspect this page' | 'Build' | 'Browser' | 'DevBrowser';
   title: string;
   subtitle?: string;
   icon: React.ReactNode;
@@ -41,6 +28,9 @@ export const CommandPalette: React.FC = () => {
   const theme = useAppStore(s => s.theme);
   const setShortcutsOpen = useAppStore(s => s.setShortcutsModalOpen);
   const triggerNuclearShred = useAppStore(s => s.triggerNuclearShred);
+  const investigate = useAppStore(s => s.startSentinelInvestigation);
+  const checkImpact = useAppStore(s => s.checkImpact);
+  const connectCodebase = useAppStore(s => s.connectCodebase);
 
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -54,129 +44,54 @@ export const CommandPalette: React.FC = () => {
     }
   }, [isOpen]);
 
+  const go = (view: Parameters<typeof setActiveView>[0]) => () => setActiveView(view);
+  const recording = useRecorderStore.getState().status === 'recording';
+  // One list of everything DevBrowser does, grouped like the sidebar. Titles are what you want to do, not what the tool is.
   const commands: CommandItem[] = [
-    {
-      id: 'nav-browser',
-      category: 'Navigation',
-      title: 'Close Tool Panel',
-      subtitle: 'Give the page the full window',
-      icon: <Globe size={16} />,
-      action: () => setActiveView('browser')
-    },
-    {
-      id: 'nav-recorder',
-      category: 'Navigation',
-      title: 'Open Bug Recorder',
-      subtitle: 'Record a bug, export it, or replay a teammate\'s recording',
-      icon: <CircleDot size={16} />,
-      action: () => setActiveView('recorder')
-    },
-    {
-      id: 'act-record',
-      category: 'Actions',
-      title: useRecorderStore.getState().status === 'recording' ? 'Stop Recording' : 'Record This Tab',
-      subtitle: 'Capture clicks, requests and errors as a shareable file',
-      icon: <CircleDot size={16} />,
+    { id: 'overview', category: 'Your system', title: 'Overview', subtitle: 'Health, alerts, recent changes and what waits for you',
+      icon: <LayoutDashboard size={16} />, action: go('overview') },
+    { id: 'map', category: 'Your system', title: 'System map', subtitle: 'Every service and how they depend on each other',
+      icon: <Share2 size={16} />, action: go('dependencies') },
+    { id: 'investigate', category: 'Your system', title: 'Investigate what is failing', subtitle: 'Walk the map to the root cause and the change behind it',
+      icon: <ShieldAlert size={16} />, action: () => { setActiveView('dependencies'); void investigate(); } },
+    { id: 'impact', category: 'Your system', title: 'Check my changes', subtitle: 'Which services your uncommitted work affects, before you merge',
+      icon: <GitCompareArrows size={16} />, action: () => { setActiveView('dependencies'); void checkImpact(); } },
+    { id: 'connect', category: 'Your system', title: 'Connect a codebase…', subtitle: 'Map a repository on this machine: services, modules, owners',
+      icon: <FolderGit2 size={16} />, action: () => void connectCodebase() },
+    { id: 'network', category: 'Inspect this page', title: 'Network', subtitle: 'Every request this page made, with timing, headers and bodies',
+      icon: <Network size={16} />, action: go('network') },
+    { id: 'console', category: 'Inspect this page', title: 'Console', subtitle: 'Errors and warnings from this page',
+      icon: <Terminal size={16} />, action: go('console') },
+    { id: 'security', category: 'Inspect this page', title: 'Security', subtitle: 'What this site exposes, with evidence and how to fix it',
+      icon: <ShieldAlert size={16} />, action: go('security') },
+    { id: 'api', category: 'Inspect this page', title: 'API client', subtitle: 'Send a request, replay one from Network, import cURL',
+      icon: <Send size={16} />, action: go('apiClient') },
+    { id: 'clear-network', category: 'Inspect this page', title: 'Clear captured requests', subtitle: 'Empty the Network list',
+      icon: <Trash2 size={16} />, action: () => clearTransactions() },
+    { id: 'run', category: 'Build', title: 'Run your project', subtitle: 'Start a dev server; its page opens when it is up',
+      icon: <Play size={16} />, action: go('run') },
+    { id: 'record', category: 'Build', title: recording ? 'Stop recording' : 'Record a bug in this tab',
+      subtitle: 'Clicks, requests and errors as one file a teammate can replay', icon: <CircleDot size={16} />,
+      action: () => { if (recording) void stopRecording(); else { setActiveView('recorder'); void startRecording(); } } },
+    { id: 'ai', category: 'Build', title: 'AI assistant', subtitle: 'Ask about this page; runs on your machine',
+      icon: <Bot size={16} />, action: go('ai') },
+    { id: 'new-tab', category: 'Browser', title: 'New tab', icon: <Plus size={16} />, shortcut: '⌘T', action: () => newTab() },
+    { id: 'page', category: 'Browser', title: 'Back to the page', subtitle: 'Close the tool and give the page the whole window',
+      icon: <Globe size={16} />, action: go('browser') },
+    { id: 'history', category: 'Browser', title: 'History & bookmarks', icon: <History size={16} />, action: go('library') },
+    { id: 'shred', category: 'Browser', title: 'Clear browsing data',
+      subtitle: 'Cookies, storage and cache of every profile, saved credentials, captured traffic', icon: <Flame size={16} color="var(--danger)" />,
       action: () => {
-        if (useRecorderStore.getState().status === 'recording') void stopRecording();
-        else { setActiveView('recorder'); void startRecording(); }
-      }
-    },
-    {
-      id: 'nav-network',
-      category: 'Navigation',
-      title: 'Go to Network Inspector',
-      subtitle: 'View live CDP stream, headers, and request bodies',
-      icon: <Network size={16} />,
-      action: () => setActiveView('network')
-    },
-    {
-      id: 'nav-api',
-      category: 'Navigation',
-      title: 'Go to API Client',
-      subtitle: 'Build, replay, and chain HTTP requests',
-      icon: <Send size={16} />,
-      action: () => setActiveView('apiClient')
-    },
-    {
-      id: 'nav-security',
-      category: 'Navigation',
-      title: 'Go to Passive Security Auditor',
-      subtitle: 'Review OWASP Top 10 evidence-based findings',
-      icon: <ShieldAlert size={16} />,
-      action: () => setActiveView('security')
-    },
-    {
-      id: 'nav-graph',
-      category: 'Navigation',
-      title: 'Open Dependency Graph',
-      subtitle: 'SentinelGraph: services, health, blast radius, investigations',
-      icon: <Share2 size={16} />,
-      action: () => setActiveView('dependencies')
-    },
-    {
-      id: 'nav-ai',
-      category: 'Navigation',
-      title: 'Go to Local AI Assistant',
-      subtitle: 'On-device Ollama code & test assistant',
-      icon: <Bot size={16} />,
-      action: () => setActiveView('ai')
-    },
-    {
-      id: 'nav-settings',
-      category: 'Navigation',
-      title: 'Go to Settings',
-      subtitle: 'Manage privacy, AI model, and integrations',
-      icon: <Settings size={16} />,
-      shortcut: '⌘,',
-      action: () => setActiveView('settings')
-    },
-    {
-      id: 'act-new-tab',
-      category: 'Workspace',
-      title: 'New Tab',
-      subtitle: 'Open a page in the current profile',
-      icon: <Plus size={16} />,
-      shortcut: '⌘T',
-      action: () => newTab()
-    },
-    {
-      id: 'act-clear-network',
-      category: 'Actions',
-      title: 'Clear Network Log',
-      subtitle: 'Purge all captured HTTP transactions',
-      icon: <Trash2 size={16} />,
-      action: () => clearTransactions()
-    },
-    {
-      id: 'act-toggle-theme',
-      category: 'Actions',
-      title: `Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Theme`,
-      subtitle: 'Toggle accessible color theme',
-      icon: theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />,
-      action: () => toggleTheme()
-    },
-    {
-      id: 'act-shortcuts',
-      category: 'Actions',
-      title: 'Keyboard Shortcuts Cheatsheet',
-      subtitle: 'View all keyboard navigation shortcuts',
-      icon: <HelpCircle size={16} />,
-      shortcut: '?',
-      action: () => setShortcutsOpen(true)
-    },
-    {
-      id: 'act-nuclear-shred',
-      category: 'Actions',
-      title: 'Clear Browsing Data',
-      subtitle: 'Cookies, storage and cache of every profile, saved credentials, captured traffic',
-      icon: <Flame size={16} color="var(--danger)" />,
-      action: () => {
-        if (confirm('Clear cookies, storage and cache for every profile, saved credentials and captured traffic?')) {
-          triggerNuclearShred();
-        }
-      }
-    }
+        if (confirm('Clear cookies, storage and cache for every profile, saved credentials and captured traffic?')) triggerNuclearShred();
+      } },
+    { id: 'guide', category: 'DevBrowser', title: 'Guide: what DevBrowser does and how', subtitle: 'The whole product on one page',
+      icon: <BookOpen size={16} />, action: go('guide') },
+    { id: 'shortcuts', category: 'DevBrowser', title: 'Keyboard shortcuts', icon: <HelpCircle size={16} />, shortcut: '?',
+      action: () => setShortcutsOpen(true) },
+    { id: 'settings', category: 'DevBrowser', title: 'Settings', subtitle: 'SentinelGraph connection, local AI, privacy',
+      icon: <Settings size={16} />, shortcut: '⌘,', action: go('settings') },
+    { id: 'theme', category: 'DevBrowser', title: `Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`,
+      icon: theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />, action: () => toggleTheme() },
   ];
 
   const filteredCommands = commands.filter(c => 
@@ -231,7 +146,7 @@ export const CommandPalette: React.FC = () => {
           borderBottom: '1px solid var(--border-subtle)',
           gap: '10px'
         }}>
-          <Search size={18} color="var(--accent-cyan)" />
+          <Search size={18} color="var(--accent)" />
           <input
             ref={inputRef}
             type="text"
@@ -241,7 +156,8 @@ export const CommandPalette: React.FC = () => {
               setSelectedIndex(0);
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Type a command or search actions..."
+            placeholder="What do you want to do? Type to filter…"
+            aria-label="Search commands"
             style={{
               flex: 1,
               background: 'transparent',
@@ -273,9 +189,13 @@ export const CommandPalette: React.FC = () => {
           ) : (
             filteredCommands.map((cmd, idx) => {
               const isSelected = idx === selectedIndex;
+              const firstOfGroup = idx === 0 || filteredCommands[idx - 1]!.category !== cmd.category;
               return (
+                <React.Fragment key={cmd.id}>
+                {firstOfGroup && <div className="eyebrow" style={{ padding: idx ? '10px 12px 4px' : '4px 12px 4px' }}>{cmd.category}</div>}
                 <div
-                  key={cmd.id}
+                  role="option"
+                  aria-selected={isSelected}
                   onClick={() => {
                     cmd.action();
                     setOpen(false);
@@ -294,7 +214,7 @@ export const CommandPalette: React.FC = () => {
                   className="transition-smooth"
                 >
                   <div style={{
-                    color: isSelected ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                    color: isSelected ? 'var(--accent)' : 'var(--text-muted)',
                     display: 'flex',
                     alignItems: 'center'
                   }}>
@@ -325,6 +245,7 @@ export const CommandPalette: React.FC = () => {
                     </span>
                   )}
                 </div>
+                </React.Fragment>
               );
             })
           )}

@@ -32,7 +32,7 @@ interface Props {
   theme: string;
 }
 
-const LAYER_Y: Record<string, number> = { edge: -340, business: -100, data: 170, platform: 340 };
+const LAYER_Y: Record<string, number> = { edge: -380, business: -130, data: 160, platform: 400 };
 const INFRA = new Set(['Service', 'Database']);
 const RECENT_MS = 2 * 60 * 60 * 1000;
 const CONTEXT_LINK = (t: string) => !['DEPENDS_ON', 'READS_FROM', 'WRITES_TO'].includes(t);
@@ -164,6 +164,13 @@ export const GraphCanvas: React.FC<Props> = ({ nodes, links, highlight, showCont
     // `fit` only reads refs, so it isn't a dependency. Re-fit when services come or go (a codebase was connected).
   }, [fitKey, size.w, size.h, nodes.length]);
 
+  // The first frame is taken while the layout still moves (and the periodic refresh nudges it): frame it again once
+  // it has settled, unless the user has zoomed or panned meanwhile.
+  useEffect(() => {
+    const timers = [1800, 4000].map(ms => setTimeout(() => { if (!userMoved.current) fit(400); }, ms));
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
   // Top 5 chokepoints by betweenness get a dashed ring.
   const chokepoints = useMemo(() => new Set(nodes.filter(n => n.type === 'Service')
     .sort((a, b) => (b.betweenness ?? 0) - (a.betweenness ?? 0)).slice(0, 5).map(n => n.id)), [nodes]);
@@ -172,13 +179,13 @@ export const GraphCanvas: React.FC<Props> = ({ nodes, links, highlight, showCont
     const g = fg.current;
     if (!g) return;
     g.d3Force('y', forceY<N>(n => (n.layer ? LAYER_Y[n.layer] ?? 0 : n.type === 'Database' ? 380 : 0))
-      .strength(n => (INFRA.has(n.type) ? 0.3 : 0)));
-    g.d3Force('collide', forceCollide<N>(n => radius(n) + 4));
-    g.d3Force('x', forceX<N>(0).strength(n => (INFRA.has(n.type) ? 0.015 : 0)));
-    g.d3Force('charge')?.strength?.((n: N) => (INFRA.has(n.type) ? -320 : -40));
+      .strength(n => (INFRA.has(n.type) ? 0.85 : 0)));
+    g.d3Force('collide', forceCollide<N>(n => radius(n) + (n.type === 'Service' ? 18 : 4)));
+    g.d3Force('x', forceX<N>(0).strength(n => (INFRA.has(n.type) ? 0.02 : 0)));
+    g.d3Force('charge')?.strength?.((n: N) => (INFRA.has(n.type) ? -420 : -40));
     const link = g.d3Force('link');
     link?.distance?.((l: L) => (l.type === 'DEPENDS_ON' ? 80 : 30));
-    link?.strength?.((l: L) => (l.type === 'DEPENDS_ON' ? 0.12 : l.type === 'OWNS' ? 0.02 : 0.6));
+    link?.strength?.((l: L) => (l.type === 'DEPENDS_ON' ? 0.05 : l.type === 'OWNS' ? 0.02 : 0.6));
     g.d3ReheatSimulation();
   }, [data]);
 
@@ -230,11 +237,11 @@ export const GraphCanvas: React.FC<Props> = ({ nodes, links, highlight, showCont
           if (highlight.currentEdges.has(l.id)) return alpha(hl, 0.95);
           if (highlight.edges.has(l.id)) return alpha(hl, 0.6);
           if (l.breaker === 'open') return alpha(palette.warn, 0.85);
-          if (failingTarget(l)) return alpha(palette.danger, 0.4);
-          return alpha(palette.faint, l.type === 'DEPENDS_ON' ? 0.3 : 0.35);
+          if (failingTarget(l)) return alpha(palette.danger, 0.55);
+          return alpha(palette.faint, l.type === 'DEPENDS_ON' ? 0.38 : 0.35);
         }}
         linkWidth={l => (highlight.currentEdges.has(l.id) ? 2.2 : highlight.edges.has(l.id) ? 1.5
-          : l.breaker === 'open' ? 1.4 : failingTarget(l) ? 1 : 0.6)}
+          : l.breaker === 'open' ? 1.4 : failingTarget(l) ? 1.4 : 1)}
         linkLineDash={l => (l.breaker === 'open' ? [4, 3] : CONTEXT_LINK(l.type) ? [2, 2] : null)}
         linkDirectionalArrowLength={l => (l.type === 'DEPENDS_ON' ? 2.5 : 0)}
         linkDirectionalArrowRelPos={0.92}
@@ -305,8 +312,8 @@ function drawNode(n: N, ctx: CanvasRenderingContext2D, scale: number, p: Palette
 
   const named = n.type === 'Deployment' || n.type === 'Person';
   const showLabel = o.current || unhealthy || o.selected || ((isInfra || named) && o.visited) ||
-    (n.type === 'Service' && scale > 0.95) || (isInfra && scale > 1.5) ||
-    (n.type === 'Service' && (n.pagerank ?? 0) > 0.04 && scale > 0.8) || (!isInfra && scale > 2.2);
+    (n.type === 'Service' && scale > 0.45) || (isInfra && scale > 1.2) ||
+    (n.type === 'Service' && (n.pagerank ?? 0) > 0.04 && scale > 0.3) || (!isInfra && scale > 2.2);
   if (!showLabel) return;
   const strong = o.visited || unhealthy || o.selected;
   const fontSize = Math.max(10.5 / scale, 2.2);

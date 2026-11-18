@@ -46,8 +46,8 @@ export const Toolbar: React.FC = () => {
   const security = siteSecurity(tab.url);
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, height: 40, padding: '0 8px', flexShrink: 0,
-      background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-subtle)' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, height: 46, padding: '0 10px', flexShrink: 0,
+      background: 'var(--bg-chrome)' }}>
       <button className="icon-btn" title="Back (Cmd+[)" aria-label="Back" disabled={!tab.canGoBack} onClick={() => goBack()}>
         <ArrowLeft size={16} />
       </button>
@@ -64,9 +64,9 @@ export const Toolbar: React.FC = () => {
       )}
 
       <form
-        style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, height: 30, padding: '0 10px',
-          margin: '0 4px', borderRadius: 15, background: 'var(--bg-tertiary)',
-          border: `1px solid ${editing ? 'var(--accent)' : 'transparent'}` }}
+        className={`omnibox${editing ? ' editing' : ''}`}
+        style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, height: 34, padding: '0 14px',
+          margin: '0 6px' }}
         onSubmit={e => {
           e.preventDefault();
           if (text.trim()) navigate(tab.id, text);

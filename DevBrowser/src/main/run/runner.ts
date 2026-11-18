@@ -94,8 +94,21 @@ export function inspectFolder(cwd: string): { name: string; suggestions: Command
 export function portOwner(port: number): Promise<PortOwner | null> {
   return new Promise(resolve => {
     const [cmd, args] = process.platform === 'win32' ? ['netstat', ['-ano', '-p', 'TCP']] : ['lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpc']];
-    execFile(cmd!, args as string[], { timeout: 4000 }, (_err, stdout) => resolve(parsePortOwner(process.platform, stdout ?? '', port)));
+    execFile(cmd!, args as string[], { timeout: 4000 }, (_err, stdout) => {
+      const owner = parsePortOwner(process.platform, stdout ?? '', port);
+      resolve(owner && process.platform === 'linux' ? { ...owner, name: linuxProgram(owner.pid) ?? owner.name } : owner);
+    });
   });
+}
+
+/** On Linux, lsof names a process after its main thread ("MainThread", "tokio-runtime-w"); the program it runs is clearer. */
+function linuxProgram(pid: number): string | null {
+  try {
+    const argv0 = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0')[0] ?? '';
+    return argv0 ? path.basename(argv0) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function killPid(pid: number): boolean {

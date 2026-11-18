@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Crosshair, ExternalLink, FlaskConical, FolderGit2, GitCompareArrows, Radio, RefreshCw, RotateCcw, ShieldAlert } from 'lucide-react';
+import { Crosshair, ExternalLink, FlaskConical, FolderGit2, GitCompareArrows, MoreHorizontal, Radio, RefreshCw, RotateCcw, ShieldAlert } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { ImpactPanel, InvestigationPanel, LiveDataPanel, SandboxPanel } from '../common/SentinelPanels';
 import { GraphCanvas, type GraphHighlight } from '../graph/GraphCanvas';
@@ -38,6 +38,7 @@ export const DependencyView: React.FC = () => {
   const [showLive, setShowLive] = useState(false);
   const [showSandbox, setShowSandbox] = useState(false);
   const [fitKey, setFitKey] = useState(0);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   // Live while the panel is open (the dashboard streams over a WebSocket; this polls).
   useEffect(() => {
@@ -115,12 +116,6 @@ export const DependencyView: React.FC = () => {
         <datalist id="sentinel-services">
           {[...services, ...databases].map(s => <option key={s.id} value={s.name ?? s.label} />)}
         </datalist>
-        <div style={{ flex: 1 }} />
-        <button className="btn" title="Pick your repository: add its services and dependencies to the graph"
-          onClick={() => void connectCodebase()}>
-          <FolderGit2 size={13} />
-          Connect codebase
-        </button>
         <label title="Also show deploys, commits, people and incidents"
           style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
           <input type="checkbox" checked={showContext} onChange={e => setShowContext(e.target.checked)} />
@@ -132,6 +127,7 @@ export const DependencyView: React.FC = () => {
         <button className="icon-btn" title="Refresh" aria-label="Refresh graph" onClick={() => void refresh()}>
           <RefreshCw size={14} />
         </button>
+        <div style={{ flex: 1 }} />
         {(unhealthy.length > 0 || alerts > 0) && (
           <button className="btn" title="Back to a healthy system (what the agent learned is kept)" disabled={run.phase === 'running'}
             onClick={() => void restoreHealthy()}>
@@ -139,22 +135,36 @@ export const DependencyView: React.FC = () => {
             Restore healthy
           </button>
         )}
-        <button className="btn" title="Load a 38-service test company and check whether the agent finds what we break in it" aria-pressed={showSandbox}
-          onClick={() => setShowSandbox(v => !v)}>
-          <FlaskConical size={13} />
-          Sandbox test
-        </button>
-        <button className="btn" title="Send the map real traces and alerts: the configuration for this server" aria-pressed={showLive}
-          onClick={() => setShowLive(v => !v)}>
-          <Radio size={13} />
-          Live data
-        </button>
+        <div style={{ position: 'relative' }}>
+          <button className="btn" aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen(v => !v)}>
+            <MoreHorizontal size={14} /> More
+          </button>
+          {moreOpen && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setMoreOpen(false)} />
+              <div className="menu" role="menu" style={{ right: 0, top: 32 }}>
+                <button role="menuitem" title="Pick your repository: add its services and dependencies to the graph"
+                  onClick={() => { setMoreOpen(false); void connectCodebase(); }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><FolderGit2 size={13} /> Connect codebase…</span>
+                </button>
+                <button role="menuitem" aria-checked={showSandbox} title="Load a 38-service test company and check whether the agent finds what we break in it"
+                  onClick={() => { setMoreOpen(false); setShowSandbox(v => !v); }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><FlaskConical size={13} /> Sandbox test</span>
+                </button>
+                <button role="menuitem" aria-checked={showLive} title="Send the map real traces and alerts: the configuration for this server"
+                  onClick={() => { setMoreOpen(false); setShowLive(v => !v); }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Radio size={13} /> Live data</span>
+                </button>
+              </div>
+            </>
+          )}
+        </div>
         <button className="btn" title="Which services do my uncommitted changes affect, and what depends on them?"
           onClick={() => void checkImpact()}>
           <GitCompareArrows size={13} />
           Check my changes
         </button>
-        <button className={`btn${alerts ? ' danger' : ''}`} disabled={run.phase === 'running'}
+        <button className={`btn${alerts ? ' highlight' : ''}`} disabled={run.phase === 'running'}
           onClick={() => void investigate()}>
           <ShieldAlert size={13} />
           {run.phase === 'running' ? 'Investigating...' : 'Investigate'}
@@ -170,7 +180,7 @@ export const DependencyView: React.FC = () => {
           <Legend />
         </div>
         {(selected || run.phase !== 'idle' || impact?.changed.length || showLive || showSandbox) && (
-          <aside style={{ width: 280, maxWidth: '45%', minWidth: 200, flexShrink: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12,
+          <aside style={{ width: 340, maxWidth: '45%', minWidth: 220, flexShrink: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12,
             padding: 12, borderLeft: '1px solid var(--border-subtle)' }}>
             {showSandbox && <SandboxPanel onClose={() => setShowSandbox(false)} onChanged={() => { void refresh(); setFitKey(k => k + 1); }} />}
             {showLive && <LiveDataPanel onClose={() => setShowLive(false)} />}

@@ -4,11 +4,16 @@ import { useAppStore, type NavigationView } from '../../store/useAppStore';
 import { FULL_PAGE_VIEWS, useNarrow } from '../../useNarrow';
 
 const TITLES: Partial<Record<NavigationView, string>> = {
+  run: 'Run',
+  console: 'Console',
   network: 'Network',
   apiClient: 'API Client',
   security: 'Security',
   recorder: 'Bug Recorder',
-  dependencies: 'SentinelGraph',
+  overview: 'Overview',
+  dependencies: 'System map',
+  library: 'History & bookmarks',
+  guide: 'Guide',
   ai: 'AI Assistant',
   settings: 'Settings'
 };
@@ -57,21 +62,21 @@ export const ToolDock: React.FC<{ children: React.ReactNode }> = ({ children }) 
   return (
     <section aria-label={`${TITLES[view] ?? ''} panel`} style={{ position: 'relative', display: 'flex', flexDirection: 'column',
       width: maximized ? undefined : width, flex: maximized ? 1 : 'none', minWidth: 0, maxWidth: '100%',
-      background: 'var(--bg-secondary)', borderLeft: '1px solid var(--border-subtle)' }}>
+      background: 'var(--bg-secondary)' }} className="frame">
       {!maximized && (
         <div
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize panel"
           onMouseDown={e => { e.preventDefault(); dragging.current = true; setResizing(true); }}
-          style={{ position: 'absolute', left: -3, top: 0, bottom: 0, width: 6, cursor: 'col-resize', zIndex: 5 }}
+          style={{ position: 'absolute', left: -8, top: 0, bottom: 0, width: 8, cursor: 'col-resize', zIndex: 5 }}
         />
       )}
       {/* While resizing, a shield stops the page's webview from swallowing mouse events. */}
       {resizing && <div style={{ position: 'fixed', inset: 0, zIndex: 100, cursor: 'col-resize' }} />}
-      <header style={{ display: 'flex', alignItems: 'center', gap: 4, height: 34, padding: '0 6px 0 12px', flexShrink: 0,
+      <header style={{ display: 'flex', alignItems: 'center', gap: 4, height: 40, padding: '0 8px 0 16px', flexShrink: 0,
         borderBottom: '1px solid var(--border-subtle)' }}>
-        <span style={{ flex: 1, fontSize: 12, fontWeight: 600 }}>{TITLES[view]}</span>
+        <span style={{ flex: 1, fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em' }}>{TITLES[view]}</span>
         {!narrow && !fullPage && <button className="icon-btn" title={maximized ? 'Restore beside page' : 'Maximize'}
           aria-label={maximized ? 'Restore panel' : 'Maximize panel'} onClick={() => setMaximized(!maximized)}>
           {maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}

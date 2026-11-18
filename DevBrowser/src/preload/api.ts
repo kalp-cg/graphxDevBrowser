@@ -1,5 +1,5 @@
 import type { RunEvent } from '../shared/domain/run';
-import type { BrowserCommand, EmulatedDevice, HardwareMetrics } from '../shared/ipc-channels';
+import type { BrowserCommand, EmulatedDevice } from '../shared/ipc-channels';
 import type { BrowserTab, ProfilePartition } from '../shared/domain/browser';
 import type { SecurityFinding } from '../shared/domain/security';
 import type { ShredResult } from '../shared/domain/privacy';
@@ -25,7 +25,6 @@ import type {
 
 export interface DevBrowserAPI {
   system: {
-    getHardwareMetrics: () => Promise<HardwareMetrics>;
     checkOllamaStatus: () => Promise<{ ok: boolean; model: string; message?: string }>;
   };
   tabs: {
@@ -67,7 +66,7 @@ export interface DevBrowserAPI {
     /** Simulate a failure of a service in the graph. */
     breakService: (service: string, kind: ChaosKind, additive?: boolean) => Promise<ChaosResult>;
     /** The addresses each service answers on (`localhost:3000` is `app`). */
-    aliases: () => Promise<Record<string, string>>;
+    workspace: () => Promise<{ repo: string | null; aliases: Record<string, string> }>;
     /** Which services the connected project's uncommitted changes touch, and what depends on them. */
     /** The 38-service test company and the exam that checks whether an agent finds what was broken in it. */
     /** Tell SentinelGraph a dev server stopped (firing) or came back, on the service that owns that address. */

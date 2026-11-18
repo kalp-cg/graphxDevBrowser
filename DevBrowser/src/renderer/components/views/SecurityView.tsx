@@ -92,7 +92,9 @@ export const SecurityView: React.FC = () => {
     <div style={{ flex: 1, display: 'flex', overflow: 'hidden', background: 'var(--bg-primary)' }}>
       {/* Left Findings List Panel */}
       <div style={{
-        width: '380px',
+        width: '42%',
+        minWidth: 250,
+        maxWidth: 380,
         background: 'var(--bg-secondary)',
         borderRight: '1px solid var(--border-subtle)',
         display: 'flex',
@@ -111,11 +113,11 @@ export const SecurityView: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <ShieldAlert size={16} color="var(--danger)" />
               <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                Passive Security Findings
+                Findings
               </span>
             </div>
 
-            <Badge label="Zero Synthetic Traffic" variant="success" />
+            <span className="tag accent" title="DevBrowser only reads the responses your browsing receives. It never sends test or attack requests to the site.">Read-only checks</span>
           </div>
 
           <SiteScope history={history} onChange={setHistory} currentUrl={currentUrl} site={siteOf(currentUrl)} total={allFindings.length} />
@@ -222,7 +224,7 @@ export const SecurityView: React.FC = () => {
             className="transition-smooth"
           >
             <Download size={13} />
-            Export Audit Report (SARIF v2.1.0)
+            Export report (SARIF)
           </button>
         </div>
       </div>
@@ -284,7 +286,7 @@ export const SecurityView: React.FC = () => {
             {/* Evidence Card */}
             <div>
               <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px' }}>
-                IMMUTABLE RAW EVIDENCE (CDP CAPTURED)
+                EVIDENCE FROM THE RESPONSE
               </div>
               <div style={{
                 background: 'var(--bg-secondary)',
@@ -315,7 +317,7 @@ export const SecurityView: React.FC = () => {
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                 <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>
-                  RECOMMENDED REMEDIATION
+                  HOW TO FIX
                 </span>
                 <button
                   onClick={() => handleCopyRemediation(selectedFinding.remediation)}

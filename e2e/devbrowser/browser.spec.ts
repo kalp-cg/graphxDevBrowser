@@ -24,7 +24,7 @@ async function launch() {
   // Linux CI containers have no SUID sandbox helper for Electron.
   const args = process.platform === "linux" ? [APP, "--no-sandbox"] : [APP];
   // The suite must not depend on whether a model happens to be running on this machine.
-  const env = { ...process.env, DEVBROWSER_USER_DATA: userData, NODE_ENV: "production", OLLAMA_HOST: "http://127.0.0.1:1" };
+  const env = { ...process.env, DEVBROWSER_USER_DATA: userData, NODE_ENV: "production", OLLAMA_HOST: "http://127.0.0.1:1", DEVBROWSER_NO_LOCAL_SENTINEL: "1" };
   // DEVBROWSER_PACKAGED=/path/to/DevBrowser(.app/Contents/MacOS/DevBrowser|.exe) runs the suite against an installed build.
   app = PACKAGED ? await electron.launch({ executablePath: PACKAGED, args: [], env })
     : await electron.launch({ executablePath: electronPath, args, cwd: APP, env });
@@ -338,7 +338,7 @@ test("Dependencies shows the live SentinelGraph; an investigation and a fix from
   await page.getByRole("button", { name: "Connect & Load Graph" }).click();
   await expect(page.getByRole("contentinfo").getByText("SentinelGraph connected")).toBeVisible();
 
-  await page.getByRole("button", { name: "Dependencies (SentinelGraph)" }).click();
+  await page.getByRole("button", { name: "System map", exact: true }).click();
   await expect(page.getByText("7 services", { exact: true })).toBeVisible();
   await expect(page.locator("canvas").first()).toBeVisible();
   await shot("07-dependencies");
@@ -346,7 +346,7 @@ test("Dependencies shows the live SentinelGraph; an investigation and a fix from
   await fetch(CONTROL, { method: "POST", body: JSON.stringify({ action: "fault", service: "inventory", rate: 0.7,
     deploy: { version: "v2.4.1", message: "Reduce orders-db pool size to 2", author: "Priya Shah" } }) });
   await expect(page.getByText(/\d+ unhealthy/)).toBeVisible({ timeout: 30_000 });
-  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
+  const panel = page.getByRole("region", { name: "System map panel" });
   await panel.getByRole("button", { name: "Investigate", exact: true }).click();
   await expect(panel.getByText("Root cause:")).toBeVisible({ timeout: 60_000 });
   await expect(panel.locator("strong", { hasText: /^inventory$/ })).toBeVisible();
@@ -362,15 +362,16 @@ test("Connect codebase maps a repository into the graph from the SentinelGraph p
   await app.evaluate(({ dialog }, folder) => {
     dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [folder] })) as unknown as typeof dialog.showOpenDialog;
   }, repo);
-  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
+  const panel = page.getByRole("region", { name: "System map panel" });
   await expect(panel).toBeVisible();
-  await panel.getByRole("button", { name: "Connect codebase" }).click();
+  await panel.getByRole("button", { name: "More" }).click();
+  await panel.getByRole("menuitem", { name: /Connect codebase/ }).click();
   await expect(page.getByText(/^Mapped /)).toBeVisible();
-  await expect(page.getByText(/\d+ services, \d+ databases, \d+ dependencies/)).toBeVisible();
+  await expect(page.getByText(/\d+ services, \d+ connections, \d+ databases/)).toBeVisible();
 });
 
 test("a service shows the traffic you browsed to it, can be opened, and live-data setup is one click", async () => {
-  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
+  const panel = page.getByRole("region", { name: "System map panel" });
   await expect(panel).toBeVisible();
   await expect.poll(async () => (await (await fetch(`${API}/api/workspace`)).json()).aliases["localhost:7401"]).toBe("gateway");
   await panel.getByRole("combobox", { name: "Find a service" }).fill("gateway");
@@ -383,8 +384,9 @@ test("a service shows the traffic you browsed to it, can be opened, and live-dat
   await expect(tabs()).toHaveCount(tabsBefore + 1);
   await page.getByRole("button", { name: /^Close Sandbox Shop|^Close localhost/ }).last().click();   // close the tab it opened
 
-  await page.getByRole("button", { name: "Dependencies (SentinelGraph)" }).isVisible();
-  await panel.getByRole("button", { name: "Live data", exact: true }).click();
+  await page.getByRole("button", { name: "System map", exact: true }).isVisible();
+  await panel.getByRole("button", { name: "More" }).click();
+  await panel.getByRole("menuitem", { name: /Live data/ }).click();
   const live = panel.getByLabel("Live data setup");
   await expect(live.getByLabel("Configuration")).toContainText(`${API}/v1/traces`);
   await live.getByRole("button", { name: "Alertmanager alerts" }).click();
@@ -393,7 +395,7 @@ test("a service shows the traffic you browsed to it, can be opened, and live-dat
 });
 
 test("check my changes: uncommitted work shows which services it affects", async () => {
-  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
+  const panel = page.getByRole("region", { name: "System map panel" });
   const marker = path.resolve(__dirname, "../../sandbox/shop/services/inventory/.e2e-impact-marker");
   writeFileSync(marker, "an uncommitted change\n");
   try {
@@ -416,7 +418,7 @@ test("check my changes: uncommitted work shows which services it affects", async
 });
 
 test("a database can fail and be named the root cause; separate failures are reported as separate, with confidence", async () => {
-  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
+  const panel = page.getByRole("region", { name: "System map panel" });
   const reset = await fetch(`${API}/api/reset?keep_memory=true`, { method: "POST" });
   expect(reset.ok).toBe(true);
   await expect(panel.getByText("all healthy")).toBeVisible({ timeout: 20_000 });
@@ -456,7 +458,7 @@ test("a database can fail and be named the root cause; separate failures are rep
 test("a narrow window gives the panel the whole area and keeps the toolbar usable", async () => {
   await page.setViewportSize({ width: 700, height: 800 });
   await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeLessThan(900);
-  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
+  const panel = page.getByRole("region", { name: "System map panel" });
   await expect(panel).toBeVisible();
   expect((await panel.boundingBox())!.width).toBeGreaterThan(560);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -467,8 +469,8 @@ test("a narrow window gives the panel the whole area and keeps the toolbar usabl
 test("demo: break a service from the graph, investigate it, restore the healthy system", async () => {
   const reset = await fetch(`${API}/api/reset?keep_memory=true`, { method: "POST" });
   expect(reset.ok).toBe(true);
-  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
-  if (!(await panel.isVisible())) await page.getByRole("button", { name: "Dependencies (SentinelGraph)" }).click();
+  const panel = page.getByRole("region", { name: "System map panel" });
+  if (!(await panel.isVisible())) await page.getByRole("button", { name: "System map", exact: true }).click();
   await expect(panel.getByText("all healthy")).toBeVisible({ timeout: 20_000 });
 
   // Healthy system: Investigate says there is nothing to investigate (not a cut-off line).
@@ -692,9 +694,10 @@ test("a new tab lists the local servers that are up, and opens one with a click"
 
 test("sandbox test: load the 38-service company and see the agent scored on what was broken", async () => {
   test.setTimeout(240_000);
-  const panel = page.getByRole("region", { name: "SentinelGraph panel" });
-  if (!(await panel.isVisible())) await page.getByRole("button", { name: "Dependencies (SentinelGraph)" }).click();
-  await panel.getByRole("button", { name: "Sandbox test", exact: true }).click();
+  const panel = page.getByRole("region", { name: "System map panel" });
+  if (!(await panel.isVisible())) await page.getByRole("button", { name: "System map", exact: true }).click();
+  await panel.getByRole("button", { name: "More" }).click();
+  await panel.getByRole("menuitem", { name: /Sandbox test/ }).click();
   const box = panel.getByLabel("Sandbox test", { exact: true }).last();
   await box.getByRole("button", { name: /Load sandbox|Reload sandbox/ }).click();
   await expect(box.getByLabel("Sandbox company")).toContainText(/38 services, 8 databases, 8 teams, 18 engineers/, { timeout: 60_000 });

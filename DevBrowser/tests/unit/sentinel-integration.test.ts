@@ -121,7 +121,7 @@ describe('SentinelGraphClient', () => {
   }
 
   it('sends no credentials', async () => {
-    const { impl, calls } = fakeFetch([{ status: 200, body: { tigergraph: { ok: true, services: 38 }, graph: 'Sentinel' } }]);
+    const { impl, calls } = fakeFetch([{ status: 200, body: { db: { ok: true, services: 38 }, graph: 'Sentinel' } }]);
     const client = new SentinelGraphClient(impl);
     client.configure('http://localhost:8100/');
     const status = await client.status();
@@ -191,6 +191,20 @@ describe('SentinelGraphClient', () => {
       'http://localhost:8100/api/browser-traffic', 'http://localhost:8100/api/browser-traffic'
     ]);
     expect(JSON.parse(calls[1]!.init.body as string)).toHaveLength(2);
+  });
+
+  it('never sends traffic captured before the map was replaced to the new map', async () => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: {} }, { status: 200, body: {} }, { status: 200, body: {} }]);
+    const client = new SentinelGraphClient(impl);
+    client.configure('http://localhost:8100');
+    client.record({ pageUrl: 'http://localhost:5555/', url: 'http://localhost:5555/api/old', method: 'GET', startTime: 1 });
+    await client.sandbox({ action: 'load' });
+    expect(await client.flush()).toBe(true);
+    client.record({ pageUrl: 'http://localhost:3000/', url: 'http://api.local/new', method: 'GET', startTime: 2 });
+    await client.scanCodebase('/code/shop');
+    expect(await client.flush()).toBe(true);
+    client.dispose();
+    expect(calls.map(c => c.url)).toEqual(['http://localhost:8100/api/sandbox/load', 'http://localhost:8100/api/workspace/scan']);
   });
 
   it('reports a clear status when not configured or unreachable', async () => {

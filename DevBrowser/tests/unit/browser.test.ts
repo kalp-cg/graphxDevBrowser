@@ -71,6 +71,11 @@ describe('agent path on the graph', () => {
     expect(done.path.nodes).toEqual(['svc:a']);
     expect(done.path.currentNodes).toEqual([]); // nothing "in progress" once the run ends
   });
+
+  it('treats a run the server stopped without a result (a reset cancelled it) as idle, not running forever', () => {
+    expect(summarizeRun({ run_id: 'r', running: false, events: [] }).phase).toBe('idle');
+    expect(summarizeRun({ run_id: 'r', running: false, events: [{ type: 'tool_result', name: 'x' }] }).phase).toBe('idle');
+  });
 });
 
 

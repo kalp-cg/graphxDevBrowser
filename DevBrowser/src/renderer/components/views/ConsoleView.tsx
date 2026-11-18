@@ -22,7 +22,7 @@ export const ConsoleView: React.FC = () => {
   const errors = entries.filter(e => e.level === 'error' && (!thisTab || e.tabId === activeId)).reduce((n, e) => n + e.count, 0);
 
   return (
-    <div role="region" aria-label="Console panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, borderBottom: '1px solid var(--border-subtle)' }}>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           {(['all', 'error', 'warning'] as const).map(l => (

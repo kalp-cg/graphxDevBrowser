@@ -38,7 +38,8 @@ export const ToastContainer: React.FC = () => {
           key={toast.id}
           className="fade-in"
           style={{
-            pointerEvents: 'auto',
+            // A notice never blocks the control under it: clicks pass through, except on its close button.
+            pointerEvents: 'none',
             background: 'var(--bg-secondary)',
             border: '1px solid var(--border-medium)',
             borderRadius: '8px',
@@ -66,7 +67,9 @@ export const ToastContainer: React.FC = () => {
 
           <button
             onClick={() => removeToast(toast.id)}
+            aria-label="Dismiss notification"
             style={{
+              pointerEvents: 'auto',
               background: 'transparent',
               border: 'none',
               color: 'var(--text-muted)',

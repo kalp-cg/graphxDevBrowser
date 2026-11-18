@@ -45,9 +45,9 @@ export const TabStrip: React.FC = () => {
   }, [context]);
 
   return (
-    <div role="tablist" aria-label="Tabs" onDoubleClick={e => e.target === e.currentTarget && newTab()} style={{ ...drag, display: 'flex', alignItems: 'flex-end', gap: 2, height: 38,
-      padding: `0 8px 0 ${isMac ? 78 : 8}px`, background: 'var(--bg-primary)', flexShrink: 0 }}>
-      <div ref={scroller} className="tab-scroller" style={{ ...noDrag, display: 'flex', alignItems: 'flex-end', gap: 2, minWidth: 0, flex: '0 1 auto',
+    <div role="tablist" aria-label="Tabs" onDoubleClick={e => e.target === e.currentTarget && newTab()} style={{ ...drag, display: 'flex', alignItems: 'center', gap: 2, height: 42,
+      padding: `4px 8px 0 ${isMac ? 78 : 10}px`, background: 'var(--bg-chrome)', flexShrink: 0 }}>
+      <div ref={scroller} className="tab-scroller" style={{ ...noDrag, display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, flex: '0 1 auto',
         overflowX: 'auto', overflowY: 'hidden' }}>
         {tabs.map((tab, index) => (
           <TabItem key={tab.id} tab={tab} index={index} active={tab.id === activeId} showProfile={multipleProfiles}
@@ -141,10 +141,10 @@ const TabItem: React.FC<{ tab: Tab; index: number; active: boolean; showProfile:
         } else if (e.button === 0) activate(tab.id);
       }}
       style={{ ...noDrag, display: 'flex', alignItems: 'center', gap: 7, flex: tab.pinned ? '0 0 38px' : '0 1 200px',
-        minWidth: tab.pinned ? 38 : active ? 96 : 44, height: 32, padding: tab.pinned ? '0 0 0 12px' : '0 6px 0 10px',
-        borderRadius: '8px 8px 0 0', cursor: 'default', position: 'relative',
-        background: active ? 'var(--bg-secondary)' : hover ? 'var(--bg-hover, rgba(127,127,127,.12))' : 'transparent',
-        boxShadow: dropping ? 'inset 2px 0 0 var(--accent)' : undefined,
+        minWidth: tab.pinned ? 38 : active ? 96 : 44, height: 32, padding: tab.pinned ? '0 0 0 12px' : '0 6px 0 12px',
+        borderRadius: 9, cursor: 'default', position: 'relative', transition: 'background-color .12s ease',
+        background: active ? 'var(--bg-tertiary)' : hover ? 'var(--bg-hover)' : 'transparent',
+        boxShadow: dropping ? 'inset 2px 0 0 var(--accent)' : active ? 'var(--shadow-sm), inset 0 0 0 1px var(--border-subtle)' : undefined,
         color: active ? 'var(--text-primary)' : 'var(--text-secondary)' }}
     >
       {tab.loading ? (

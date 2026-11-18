@@ -10,7 +10,6 @@ import type { ApiSendRequest } from '../shared/domain/api-client';
 
 const devBrowserAPI: DevBrowserAPI = {
   system: {
-    getHardwareMetrics: () => ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_GET_HARDWARE_METRICS),
     checkOllamaStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_CHECK_OLLAMA_STATUS)
   },
   tabs: {
@@ -64,7 +63,7 @@ const devBrowserAPI: DevBrowserAPI = {
     scanCodebase: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_SCAN_CODEBASE),
     breakService: (service: string, kind: string, additive?: boolean) =>
       ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_BREAK_SERVICE, { service, kind, additive }),
-    aliases: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_ALIASES),
+    workspace: () => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_ALIASES),
     reportDevServer: (service: string, firing: boolean, address: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_REPORT_DEV_SERVER, { service, firing, address }),
     sandbox: (args: unknown) => ipcRenderer.invoke(IPC_CHANNELS.SENTINEL_SANDBOX, args),

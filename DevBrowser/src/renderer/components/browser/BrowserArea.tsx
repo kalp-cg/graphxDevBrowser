@@ -12,7 +12,7 @@ export const BrowserArea: React.FC<{ hidden?: boolean }> = ({ hidden }) => {
   const split = useBrowserStore(s => s.split);
 
   return (
-    <div style={{ flex: 1, minWidth: 0, display: hidden ? 'none' : 'flex', background: 'var(--bg-primary)' }}>
+    <div className="frame" style={{ flex: 1, minWidth: 0, display: hidden ? 'none' : 'flex', background: 'var(--bg-primary)' }}>
       {tabs.map(tab => {
         const pane = split ? split.indexOf(tab.id) : tab.id === activeId ? 0 : -1;
         return (

@@ -2,7 +2,7 @@ import type { BlastRadiusResult, IGraphEdge, IGraphNode } from './graph';
 import type { NetworkTransaction } from './network';
 
 /**
- * SentinelGraph integration: the TigerGraph-backed dependency graph and incident agent
+ * SentinelGraph integration: the dependency graph and incident agent
  * (github: sentinelgraph-tigergraph). DevBrowser reads the live graph from its API and sends it the
  * API calls it captures, so the graph shows the services a page really talks to.
  */
@@ -28,6 +28,7 @@ export interface SentinelNode {
   threshold?: number;
   title?: string;
   reason?: string;
+  risk?: string;
   version?: string;
   ref?: string;
 }
@@ -56,7 +57,7 @@ export interface SentinelBlastRadius {
   edge_uids: string[];
 }
 
-/** Whether the SentinelGraph API (and the TigerGraph behind it) is reachable. */
+/** Whether the SentinelGraph API (and the graph behind it) is reachable. */
 export interface SentinelStatus {
   ok: boolean;
   message: string;
@@ -374,6 +375,8 @@ export function summarizeRun(run: SentinelRun | null): RunSummary {
       confidenceReason: end.confidence_reason ?? null, report: end.report ?? null,
       seconds: end.seconds ?? null, proposed, path: { ...path, currentNodes: [], currentEdges: [] } };
   }
+  // Stopped without a result: the server cancelled it (a reset). Nothing is in progress.
+  if (!run.running) return empty;
   return { ...empty, phase: 'running', steps, proposed, path };
 }
 
