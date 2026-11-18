@@ -7,8 +7,7 @@
 # Render Blueprint: New > Blueprint > pick this repo > Apply. The free plan sleeps after 15 minutes without traffic and takes about a
 # minute to wake; DevBrowser retries while it does. Its graph is rebuilt from the seed on every start (no disk on the free plan).
 #
-# To use TigerGraph Cloud and/or Gemini instead: add TG_HOST, TG_SECRET (and GRAPH_BACKEND=tigergraph) and/or GEMINI_API_KEY with
-# LLM_PROVIDER=gemini as secret env vars in the Render dashboard.
+# To use Gemini instead of the deterministic agent: add GEMINI_API_KEY and LLM_PROVIDER=gemini as secret env vars in the Render dashboard.
 services:
   - type: web
     name: sentinelgraph-api
@@ -21,8 +20,6 @@ services:
     envVars:
       - key: SEED_DEMO
         value: "1"
-      - key: GRAPH_BACKEND
-        value: local
       - key: LLM_PROVIDER
         value: autopilot
       - key: AUTOPILOT_DELAY_S

@@ -1,16 +1,12 @@
-"""An embedded, file-backed stand-in for a TigerGraph graph: same calls, same results, no server.
+"""SentinelGraph's graph engine: embedded, file-backed, no server and no account.
 
-SentinelGraph talks to TigerGraph through a small slice of pyTigerGraph (REST++ upserts and reads) plus 15
-interpreted GSQL queries. This module implements exactly that slice, and each GSQL query as Python with the
-same semantics, so every tool, the agent and the API run unchanged on a laptop:
+The tools describe their graph queries in GSQL (multi-hop traversals, PageRank, betweenness, ...); this module
+executes each one as Python with the same semantics, and offers the upsert/read calls the ingesters use. State
+lives in one JSON file guarded by `flock`, so the API process and the agent's MCP tool server (a subprocess)
+see the same graph.
 
-- the local sandbox and the free single-developer tier (`GRAPH_BACKEND=local`),
-- the test suite, hermetically, in CI (TigerGraph stays the target for the nightly run),
-- the MCP agent subprocess: state lives in one JSON file guarded by `flock`, so the API process and the
-  agent's tool server see the same graph.
-
-It is sized for one team's topology (hundreds to a few thousand vertices). Teams and production use TigerGraph.
-A GSQL query without a local implementation raises, and a test checks every query in the codebase has one.
+It is sized for one team's topology (hundreds to a few thousand vertices). A query without an implementation
+here raises, and a test checks every query in the codebase has one.
 """
 import fcntl
 import json
@@ -309,7 +305,7 @@ def _min(values: list[str]) -> str:
 
 
 # ---- the GSQL queries, as Python ----------------------------------------------------------------------------
-# Each takes (graph, params) inside a transaction and returns what the query PRINTs, keyed like TigerGraph.
+# Each takes (graph, params) inside a transaction and returns what the query PRINTs, keyed by the name the GSQL PRINTs.
 
 def q_context(g: LocalGraph, p: dict) -> dict:
     S = [s for s in g._all("Service") if s["name"] == p["service"]]

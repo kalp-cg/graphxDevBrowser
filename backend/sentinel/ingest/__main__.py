@@ -10,7 +10,7 @@ from ..schema import ensure_schema
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build the SentinelGraph graph from a real or sandboxed system.")
-    parser.add_argument("--graph", default=settings.tg_graph, help="graph name (default: %(default)s)")
+    parser.add_argument("--graph", default=settings.graph_name, help="graph name (default: %(default)s)")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sb = sub.add_parser("sandbox", help="wipe the graph and load synthetic OpenTelemetry traffic")
     sb.add_argument("--mode", choices=["microservices", "monolith"], default="microservices")

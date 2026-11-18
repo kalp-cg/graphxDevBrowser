@@ -17,7 +17,7 @@ INTERPRET QUERY (STRING service, INT now) FOR GRAPH $graphname SYNTAX v2 {
 
 def service_context(g: Graph, service: str) -> dict:
     """The raw context of a service: service, team, on-call people, databases, last 3 deploys (newest first)."""
-    out = run(g, CONTEXT_GSQL, {"service": service, "now": now_ms()}, query_name="sentinel_service_context")
+    out = run(g, CONTEXT_GSQL, {"service": service, "now": now_ms()})
     team = flat(out["T"])
     return {"service": flat(out["S"])[0], "team": team[0] if team else {},
             "on_call": sorted(flat(out["P"]), key=lambda p: p["uid"]),
@@ -60,7 +60,7 @@ INTERPRET QUERY () FOR GRAPH $graphname SYNTAX v2 {
 
 
 def firing_alerts(g: Graph) -> list[dict]:
-    return sorted(flat(run(g, ALERTS_GSQL, query_name="sentinel_active_alerts")["A"]), key=lambda a: (a["at"], a["uid"]))
+    return sorted(flat(run(g, ALERTS_GSQL)["A"]), key=lambda a: (a["at"], a["uid"]))
 
 
 def get_active_alerts(graph: Graph | None = None) -> dict:

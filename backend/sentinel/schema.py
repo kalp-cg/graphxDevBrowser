@@ -1,9 +1,9 @@
-"""TigerGraph schema for SentinelGraph: one graph, local vertex/edge types, created on demand.
+"""SentinelGraph schema: the vertex and edge types of the graph and their attributes.
 
 Every vertex's primary id is its stable `uid` (`svc:checkout-api`, `dep:inventory-db-proxy:v4.2.0`, ...).
 Every edge has a reverse edge (`reverse_<NAME>`) so GSQL can walk it against the arrow.
 """
-from pyTigerGraph import TigerGraphConnection
+from typing import Any
 
 VERTICES = {
     "Team": "name STRING, domain STRING, slack_channel STRING",
@@ -61,31 +61,7 @@ def vertex_type(uid: str) -> str:
     return UID_TYPES[uid.split(":", 1)[0]]
 
 
-def schema_job(graph: str) -> str:
-    adds = [f"ADD VERTEX {name} (PRIMARY_ID uid STRING, {attrs}) WITH primary_id_as_attribute=\"true\";"
-            for name, attrs in VERTICES.items()]
-    for name, (pairs, attrs) in EDGES.items():
-        body = pairs + (f", {attrs}" if attrs else "")
-        adds.append(f"ADD DIRECTED EDGE {name} ({body}) WITH REVERSE_EDGE=\"reverse_{name}\";")
-    lines = "\n  ".join(adds)
-    return (f"USE GRAPH {graph}\nCREATE SCHEMA_CHANGE JOB sentinel_schema FOR GRAPH {graph} {{\n  {lines}\n}}\n"
-            f"RUN SCHEMA_CHANGE JOB sentinel_schema\nDROP JOB sentinel_schema")
-
-
-def ensure_schema(conn: TigerGraphConnection) -> bool:
-    """Create the graph and its local schema if they don't exist yet. Returns True if it created anything.
-
-    Only ever touches `conn.graphname`; other graphs on the same instance are left alone.
-    """
-    graph = conn.graphname
-    if f"Graph {graph}(" in str(conn.gsql("SHOW GRAPH *")):
-        if "Service" in str(conn.gsql(f"USE GRAPH {graph}\nSHOW VERTEX *")):
-            return False
-    else:
-        out = str(conn.gsql(f"CREATE GRAPH {graph}()"))
-        if "created" not in out.lower():
-            raise RuntimeError(f"could not create graph {graph}: {out}")
-    out = str(conn.gsql(schema_job(graph)))
-    if "fail" in out.lower() or "error" in out.lower():
-        raise RuntimeError(f"schema change failed on {graph}: {out}")
-    return True
+def ensure_schema(conn: Any) -> bool:
+    """The embedded engine derives its schema from VERTICES and EDGES, so there is nothing to create.
+    Kept so callers can keep asking; returns True if it created anything (never)."""
+    return False

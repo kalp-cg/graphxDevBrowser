@@ -1,13 +1,10 @@
 import os
 
 os.environ.setdefault("AUTOPILOT_DELAY_S", "0")  # before sentinel.config is imported
-# GRAPH_BACKEND=local runs the whole suite hermetically on the embedded engine (CI default); tigergraph runs it
-# against the real instance in TG_HOST (graph Sentinel_test).
-if os.getenv("GRAPH_BACKEND", "local") == "local":
-    import tempfile
+# The whole suite runs hermetically on the embedded engine, in a throwaway directory.
+import tempfile  # noqa: E402
 
-    os.environ["GRAPH_BACKEND"] = "local"
-    os.environ["LOCAL_GRAPH_DIR"] = tempfile.mkdtemp(prefix="sentinel-test-")
+os.environ["LOCAL_GRAPH_DIR"] = tempfile.mkdtemp(prefix="sentinel-test-")
 
 import pytest  # noqa: E402
 

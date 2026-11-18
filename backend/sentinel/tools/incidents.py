@@ -79,7 +79,7 @@ INTERPRET QUERY (INT now) FOR GRAPH $graphname SYNTAX v2 {
 def settle_incidents(graph: Graph | None = None) -> list[str]:
     """Mark incidents resolved once every alert that triggered them is resolved. Returns their ids."""
     g = graph_or_default(graph)
-    return sorted(r["id"] for r in flat(run(g, SETTLE_GSQL, {"now": now_ms()}, query_name="sentinel_settle")["I"]))
+    return sorted(r["id"] for r in flat(run(g, SETTLE_GSQL, {"now": now_ms()})["I"]))
 
 
 def record_steps(run_id: str, steps: int, graph: Graph | None = None) -> None:

@@ -37,7 +37,7 @@ def test_summary_separates_the_chosen_model_from_the_fallback():
 def test_the_builtin_agent_passes_a_sample_of_the_exam(graph):
     import os
 
-    os.environ["TG_GRAPH"] = "Sentinel_test"   # the toolbox is a subprocess; it reads this
+    os.environ["SENTINEL_GRAPH"] = "Sentinel_test"   # the toolbox is a subprocess; it reads this
     sandbox.load_company(graph)
     cases = {c.id: c for c in sandbox.build_cases(graph, 12)}
 
@@ -59,7 +59,7 @@ def test_the_exam_runs_through_the_api_and_leaves_the_company_healthy(graph, mon
 
     from sentinel.seed.generator import wipe
 
-    monkeypatch.setenv("TG_GRAPH", "Sentinel_test")
+    monkeypatch.setenv("SENTINEL_GRAPH", "Sentinel_test")
     for target in ("sentinel.api.main.get_graph", "sentinel.api.graph_view.get_graph",
                    "sentinel.tools.common.get_graph", "sentinel.seed.scenarios.get_graph"):
         monkeypatch.setattr(target, lambda name=None: graph)

@@ -8,13 +8,13 @@ from .scenarios import SCENARIOS, inject_scenario
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Load the SentinelGraph baseline into TigerGraph.")
+    parser = argparse.ArgumentParser(description="Load the SentinelGraph sample company into the graph.")
     parser.add_argument("--reset", action="store_true", help="wipe the graph and load the healthy baseline")
     parser.add_argument("--scenario", choices=sorted(SCENARIOS),
                         help="soft reset (keeps learned memory), then inject an incident")
     parser.add_argument("--fresh", action="store_true", help="with --scenario: re-seed everything first")
     parser.add_argument("--if-empty", action="store_true", help="seed only if the graph has no services yet")
-    parser.add_argument("--graph", default=settings.tg_graph, help="graph name (default: %(default)s)")
+    parser.add_argument("--graph", default=settings.graph_name, help="graph name (default: %(default)s)")
     args = parser.parse_args()
     if args.scenario:
         info = inject_scenario(args.scenario, get_graph(args.graph), fresh=args.fresh)

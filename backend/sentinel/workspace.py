@@ -4,7 +4,7 @@ Its main job is identity. A browser sees `localhost:7004`, a trace says `checkou
 `services/checkout`. A codebase scan (ingest/codebase.py) records every address a service answers on, so
 traffic captured by DevBrowser lands on the same `Service` vertex as the traces and the code.
 
-Stored as a small JSON file next to the local graph (one per graph), so it works the same with TigerGraph.
+Stored as a small JSON file next to the local graph (one per graph).
 """
 import json
 import os
@@ -24,7 +24,7 @@ def _path(graph: str) -> Path:
 
 
 def load(graph: str | None = None) -> dict[str, Any]:
-    p = _path(graph or settings.tg_graph)
+    p = _path(graph or settings.graph_name)
     try:
         return json.loads(p.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
@@ -32,7 +32,7 @@ def load(graph: str | None = None) -> dict[str, Any]:
 
 
 def save(data: dict[str, Any], graph: str | None = None) -> None:
-    p = _path(graph or settings.tg_graph)
+    p = _path(graph or settings.graph_name)
     with _lock:
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(".tmp")

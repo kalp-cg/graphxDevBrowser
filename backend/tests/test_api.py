@@ -6,7 +6,7 @@ from conftest import TEST_GRAPH
 
 
 def test_api_flow(graph, monkeypatch):
-    os.environ["TG_GRAPH"] = TEST_GRAPH
+    os.environ["SENTINEL_GRAPH"] = TEST_GRAPH
     monkeypatch.setattr("sentinel.api.main.get_graph", lambda name=None: graph)
     monkeypatch.setattr("sentinel.api.graph_view.get_graph", lambda name=None: graph)
     monkeypatch.setattr("sentinel.seed.scenarios.get_graph", lambda name=None: graph)
@@ -16,7 +16,7 @@ def test_api_flow(graph, monkeypatch):
 
     inject_scenario("db-pool-exhaustion", graph, fresh=True)
     with TestClient(app) as c:
-        assert c.get("/api/health").json()["tigergraph"]["ok"]
+        assert c.get("/api/health").json()["db"]["ok"]
         assert {s["name"] for s in c.get("/api/scenarios").json()} >= {"db-pool-exhaustion", "cache-stampede"}
         assert c.post("/api/scenarios/nope").status_code == 404
         info = c.post("/api/scenarios/bad-config-push").json()

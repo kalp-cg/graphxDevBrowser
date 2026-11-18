@@ -1,1 +1,1 @@
-"""SentinelGraph: a graph-native incident commander on TigerGraph."""
+"""SentinelGraph: a graph-native incident commander."""

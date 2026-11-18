@@ -1,6 +1,6 @@
 # Graph data model
 
-SentinelGraph keeps **everything in one TigerGraph graph** (`Sentinel`): the infrastructure, its change history,
+SentinelGraph keeps **everything in one graph** (`Sentinel`, in the embedded engine): the infrastructure, its change history,
 the people who own it, live alerts, and the memory of past incidents. Because memory lives next to the services it
 touched, "have we seen this before?" is a graph traversal, not a text search.
 

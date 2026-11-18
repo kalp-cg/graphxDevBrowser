@@ -41,7 +41,7 @@ BAD_DEPLOYS = {
 
 def env() -> dict[str, str]:
     """The API's environment: embedded graph, sandbox actions applied for real, deterministic agent."""
-    return {**os.environ, "GRAPH_BACKEND": "local", "LOCAL_GRAPH_DIR": str(DATA), "TG_GRAPH": "Sandbox",
+    return {**os.environ, "LOCAL_GRAPH_DIR": str(DATA), "SENTINEL_GRAPH": "Sandbox",
             "ACTION_ADAPTER": "sandbox", "ACTIONS_MODE": "live",
             "SANDBOX_URL": CONTROL.removesuffix("/__control"),
             "LLM_PROVIDER": os.getenv("SANDBOX_LLM", "autopilot"), "AUTOPILOT_DELAY_S": os.getenv("AUTOPILOT_DELAY_S", "0.4"),
@@ -82,14 +82,10 @@ def up(args: argparse.Namespace) -> None:
     procs.append(subprocess.Popen([PYTHON, str(ROOT / "sandbox" / "shop" / "run_shop.py"), "--sentinel", API,
                                    "--rps", str(args.rps)], env=env()))
     wait_for(CONTROL)
-    if args.ui:
-        procs.append(subprocess.Popen(["npm", "run", "dev", "--", "-p", "3002"], cwd=ROOT / "frontend",
-                                      env={**os.environ, "NEXT_PUBLIC_API_URL": API}))
     print(f"""
 sandbox is up
   storefront   http://localhost:7400      (browse it in DevBrowser)
   API          {API}
-  dashboard    {"http://localhost:3002" if args.ui else "python sandbox/run.py up --ui"}
   DevBrowser   Settings -> Integrations -> SentinelGraph: {API}
 
 try:  python sandbox/run.py break inventory   then   investigate   then   approve rollback
@@ -207,7 +203,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("up", help="start the sandbox (Ctrl+C stops it)")
-    p.add_argument("--ui", action="store_true", help="also start the web dashboard on :3002")
     p.add_argument("--keep", action="store_true", help="keep the graph from the last run (incident memory)")
     p.add_argument("--rps", type=float, default=6.0)
     for name in ("break", "demo"):

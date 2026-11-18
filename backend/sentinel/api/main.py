@@ -169,7 +169,7 @@ async def health() -> dict:
     except RuntimeError as exc:
         llm = f"unavailable: {exc}"
     providers = await asyncio.to_thread(available_providers)
-    return {"tigergraph": db, "backend": settings.graph_backend, "graph": settings.tg_graph, "llm": llm,
+    return {"db": db, "graph": settings.graph_name, "llm": llm,
             "providers": providers,
             "commit": (os.getenv("RENDER_GIT_COMMIT") or os.getenv("GIT_COMMIT") or "")[:7],
             "tools": runs.toolbox.names if runs.toolbox else [], "running": runs.busy}

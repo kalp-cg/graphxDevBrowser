@@ -13,21 +13,11 @@ load_dotenv(_ROOT / "backend" / ".env")
 
 @dataclass(frozen=True)
 class Settings:
-    # tigergraph | local (embedded, file-backed: sandbox, tests, single developer). Default: tigergraph when
-    # TG_HOST is set, otherwise local, so a fresh checkout runs with no graph server at all.
-    graph_backend: str = os.getenv("GRAPH_BACKEND", "") or ("tigergraph" if os.getenv("TG_HOST") else "local")
+    # The graph lives in the embedded, file-backed engine (localgraph.py): one JSON file per graph, no server.
     local_graph_dir: str = os.getenv("LOCAL_GRAPH_DIR", str(_ROOT / ".sentinel-data"))
+    graph_name: str = os.getenv("SENTINEL_GRAPH", "Sentinel")
 
-    tg_host: str = os.getenv("TG_HOST", "http://localhost:14240")
-    tg_graph: str = os.getenv("TG_GRAPH", "Sentinel")
-    # A secret is preferred: tokens are minted from it and renewed when they expire. A bare token works until
-    # it expires.
-    tg_secret: str = os.getenv("TG_SECRET", "")
-    tg_token: str = os.getenv("TG_TOKEN", "")
-    tg_username: str = os.getenv("TG_USERNAME", "tigergraph")
-    tg_password: str = os.getenv("TG_PASSWORD", "")
-
-    llm_provider: str = os.getenv("LLM_PROVIDER", "ollama")
+    llm_provider: str = os.getenv("LLM_PROVIDER", "autopilot")
     llm_model: str = os.getenv("LLM_MODEL", "")
     llm_max_steps: int = int(os.getenv("LLM_MAX_STEPS", "14"))
     autopilot_delay_s: float = float(os.getenv("AUTOPILOT_DELAY_S", "0.9"))

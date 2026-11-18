@@ -144,7 +144,7 @@ INTERPRET QUERY (SET<STRING> services, INT since) FOR GRAPH $graphname SYNTAX v2
 
 def deployments(g: Graph, services: list[str], since: int = 0) -> list[dict]:
     """Deployments to these services since `since` (ms), newest first, with commit, author and team."""
-    found = flat(run(g, RECENT_CHANGES_GSQL, {"services": services, "since": since}, query_name="sentinel_recent_changes")["D"])
+    found = flat(run(g, RECENT_CHANGES_GSQL, {"services": services, "since": since})["D"])
     for r in found:
         for k in ("commit_uid", "sha", "message", "author", "author_uid", "author_team"):
             r[k] = r[k] or None

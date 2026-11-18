@@ -20,7 +20,7 @@ def run(question="Investigate", llm=None):
         events.append(e)
 
     async def go():
-        os.environ["TG_GRAPH"] = TEST_GRAPH  # the MCP server subprocess reads this
+        os.environ["SENTINEL_GRAPH"] = TEST_GRAPH  # the MCP server subprocess reads this
         async with GraphToolbox() as tb:
             return await investigate(question, emit, tb, llm or Autopilot())
 

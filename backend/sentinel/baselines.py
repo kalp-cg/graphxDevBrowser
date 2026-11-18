@@ -2,7 +2,7 @@
 
 A slow service is only slow compared with itself: a 4 s checkout is normal, a 4 s currency lookup is not. The OTLP ingest keeps, per
 component, the p90 span duration of its recent healthy batches and compares the next batch with it. Stored as a small JSON file next to
-the workspace (one per graph), so it works the same with TigerGraph and survives a restart.
+the workspace (one per graph), so it survives a restart.
 """
 import json
 import os

@@ -27,7 +27,7 @@ class GraphToolbox:
         params = StdioServerParameters(
             command=sys.executable,
             args=["-m", "sentinel.mcp_server"],
-            env=dict(os.environ),  # the server needs TG_*
+            env=dict(os.environ),  # the server needs SENTINEL_GRAPH and LOCAL_GRAPH_DIR
             cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
         )
         read, write = await self._stack.enter_async_context(stdio_client(params))

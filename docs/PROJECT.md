@@ -55,12 +55,12 @@ is why the detectors exist.
 - Not proven in a production environment of any company. All accuracy numbers are from replayed recordings of test systems.
 - Single fault at a time in the benchmark. The agent handles several independent failures, but that is tested on synthetic cases only.
 - No multi-user accounts, shared maps or access control. One engineer, one machine, one graph.
-- The local graph engine is a JSON file; a large organisation needs TigerGraph (supported) and a service that stays up.
+- The graph engine is a JSON file sized for one team's system; a large organisation needs a graph database server and a service that stays up.
 - Installers are not code-signed.
 - Metrics arrive as JSON you send; there is no built-in Prometheus puller yet.
 
 ## The path to big and mid-size companies
 1. Accuracy at scale (hundreds of services): measured on Train Ticket; ranking and false-positive control are the work.
-2. Always-on service: run the API as a deployment with TigerGraph, fed by the OpenTelemetry Collector and Alertmanager.
+2. Always-on service: run the API as a deployment with a graph database server, fed by the OpenTelemetry Collector and Alertmanager.
 3. Team features: shared map, ownership, roles, audit log of approved actions.
 4. A pilot with a real team, comparing time-to-root-cause against how they work today.

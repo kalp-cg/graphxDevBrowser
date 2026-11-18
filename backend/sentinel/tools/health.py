@@ -25,7 +25,7 @@ def recompute_health(graph: Graph) -> dict:
     Root causes (unhealthy services without their own alert) only recover through an action.
     Returns the recovered service uids and the resolved alert uids.
     """
-    out = run(graph, HEALTH_GSQL, query_name="sentinel_health")
+    out = run(graph, HEALTH_GSQL)
     found = flat(out["S"])
     status = {r["name"]: r["status"] for r in found}
     faulty = {r["name"] for r in found if r["root_fault"]}

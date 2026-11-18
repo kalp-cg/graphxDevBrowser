@@ -4,5 +4,4 @@ mcp==2.3.0
 pytest==9.1.1
 PyYAML==6.0.3
 python-dotenv==1.2.1
-pyTigerGraph==2.0.5
 uvicorn[standard]==0.54.0

@@ -65,16 +65,15 @@ INTERPRET QUERY () FOR GRAPH $graphname SYNTAX v2 {
 """
 
 
-def scores(g: Graph, gsql: str, query_name: str | None = None) -> list[dict]:
+def scores(g: Graph, gsql: str) -> list[dict]:
     """Every service with its score, highest first."""
-    out = run(g, gsql, query_name=query_name)
+    out = run(g, gsql)
     found = flat(next(iter(out.values())))
     return sorted(found, key=lambda r: (-r["score"], r["name"]))
 
 
-def _ranked(g: Graph, gsql: str, top: int, focus: str | None,
-            query_name: str | None = None) -> tuple[list[dict], dict | None]:
-    ranked = [{k: r[k] for k in ("name", "uid", "tier", "status", "score")} for r in scores(g, gsql, query_name=query_name)]
+def _ranked(g: Graph, gsql: str, top: int, focus: str | None) -> tuple[list[dict], dict | None]:
+    ranked = [{k: r[k] for k in ("name", "uid", "tier", "status", "score")} for r in scores(g, gsql)]
     for i, r in enumerate(ranked, start=1):
         r["rank"] = i
         r["score"] = round(float(r["score"]), 4)
@@ -93,7 +92,7 @@ def critical_services(top: int = 10, service: str | None = None, graph: Graph | 
     if service and (err := check_services(g, [service])):
         return err
     n = clamp(top, 1, 25, 10)
-    items, focus = _ranked(g, PAGERANK_GSQL, n, service, query_name="sentinel_pagerank")
+    items, focus = _ranked(g, PAGERANK_GSQL, n, service)
     return result({"algorithm": "pageRank", "top": items, "focus": focus}, PAGERANK_GSQL,
                   [r["uid"] for r in items] + ([focus["uid"]] if focus else []))
 
@@ -104,7 +103,7 @@ def chokepoints(top: int = 10, service: str | None = None, graph: Graph | None =
     if service and (err := check_services(g, [service])):
         return err
     n = clamp(top, 1, 25, 10)
-    items, focus = _ranked(g, BETWEENNESS_GSQL, n, service, query_name="sentinel_betweenness")
+    items, focus = _ranked(g, BETWEENNESS_GSQL, n, service)
     return result({"algorithm": "betweenness", "top": items, "focus": focus}, BETWEENNESS_GSQL,
                   [r["uid"] for r in items] + ([focus["uid"]] if focus else []))
 
