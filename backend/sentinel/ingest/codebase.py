@@ -27,7 +27,8 @@ from typing import Any
 import yaml
 
 from ..db import Batch, Graph, link, upsert
-from .modules import dominant_language, scan_modules
+from . import workspaces
+from .modules import _source_files, dominant_language, scan_modules
 from .otel import record_change
 
 COMPOSE_FILES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
@@ -57,6 +58,9 @@ PLUMBING = re.compile(r"(otel-?collector|opentelemetry-collector|otelcol|jaeger|
                       r"alertmanager|flagd|load-?gen|locust|k6$|traffic-?gen|zipkin|kafka-?(gui|ui)|kafdrop|pgadmin|adminer|"
                       r"mailhog|mailpit|(^|-)init$|(^|-)sim$|migrat)", re.I)
 TIERS = ("critical", "high", "medium", "low")
+# Folders next to an app that are not part of what it runs: never mistaken for "the" service of a repository.
+AUX_DIRS = re.compile(r"^(e2e|tests?|testing|docs?|documentation|examples?|samples?|scripts?|tools|benchmarks?|bench|fixtures|"
+                      r"demos?|website|playground|storybook|\.?github|hack|contrib|third_party|vendor)$", re.I)
 MAX_CHANGES_PER_SERVICE = 5
 
 
@@ -116,8 +120,12 @@ def _has(path: Path, marker: str) -> bool:
 
 def _has_files(repo: Path) -> bool:
     """Is there anything in the folder besides hidden files and `.git`?"""
-    return any(p.is_file() and not p.name.startswith(".") and ".git" not in p.relative_to(repo).parts[:1]
-               for p in repo.rglob("*"))
+    return any(not p.name.startswith(".") for p in workspaces.walk(repo, 2000))
+
+
+def _has_code(repo: Path) -> bool:
+    """Source files in a language we read, or a project manifest of any kind."""
+    return bool(_source_files(repo)) or bool(_language(repo))
 
 
 def _language(path: Path, dockerfile: Path | None = None, deep: bool = True) -> str:
@@ -130,6 +138,8 @@ def _language(path: Path, dockerfile: Path | None = None, deep: bool = True) -> 
                 if _has(d, marker):
                     if lang == "javascript" and _has(d, "tsconfig.json"):
                         return "typescript"
+                    if lang in ("java", "cpp"):  # Gradle builds Kotlin too; CMake sits beside Swift, Rust, ... packages
+                        return dominant_language(d) or lang
                     return lang
     if dockerfile is None and (path / "Dockerfile").is_file():
         dockerfile = path / "Dockerfile"
@@ -273,7 +283,7 @@ K8S_SKIP = {".git", ".github", "node_modules", "vendor", "charts", "helm-chart",
 
 def _k8s_docs(repo: Path) -> list[dict]:
     docs = []
-    for f in sorted(list(repo.rglob("*.yaml")) + list(repo.rglob("*.yml")))[:2000]:
+    for f in [p for p in workspaces.walk(repo) if p.suffix in (".yaml", ".yml")][:2000]:
         rel = f.relative_to(repo).parts
         if len(rel) > 5 or K8S_SKIP & set(rel[:-1]):
             continue
@@ -419,14 +429,26 @@ def _git_module_changes(repo: Path, since: str, module_of: Any, names: set[str])
 
 def _expand_monolith(repo: Path, services: dict[str, dict], databases: dict[str, str], deps: set[tuple[str, str]],
                      aliases: dict[str, str], rules: list[tuple[str, str]], since: str) -> dict[str, Any] | None:
-    """One deployable built from the repo root: its modules are what there is to map. Replaces the single service by
-    its modules, the imports between them, and what each one calls (databases, outside APIs)."""
+    """One deployable (built from the repo root, or the only app in a compose file): its modules are what there is to map.
+    Replaces the single service by its modules, the imports between them, and what each one calls (databases, outside APIs)."""
     mono = next(iter(services.values()), None)
-    if len(services) != 1 or mono is None or mono["path"]:
+    if len(services) != 1 or mono is None:
         return None
-    found = scan_modules(repo)
+    sub = (mono["path"] or "").strip("/")   # the app's folder in the repository; "" = the whole repository
+    base = repo / sub if sub else repo
+    ws = workspaces.find(base)
+    found = (scan_modules(base, components=ws["components"], packages=ws.get("packages")) if ws else None) or scan_modules(base)
     if not found:
         return None
+    if sub:  # module folders and file paths are relative to the app's folder; the rest of the scan speaks repository paths
+        for m in found["modules"].values():
+            m["path"] = f"{sub}/{m['path']}".rstrip("/") if m["path"] else sub
+        inner = found["module_of"]
+        found["module_of"] = lambda r: inner(r[len(sub) + 1:]) if r.startswith(sub + "/") else ""
+        found["prefix"] = "/".join(x for x in (sub, found["prefix"]) if x)
+    if ws:
+        found["dependencies"] |= ws["dependencies"]
+        found["tool"] = ws["tool"]
     mods = found["modules"]
     if "root" in mods and len(mods) >= 4:
         mods = {n: m for n, m in mods.items() if n != "root"}  # config files at the repo root
@@ -450,6 +472,8 @@ def _expand_monolith(repo: Path, services: dict[str, dict], databases: dict[str,
         for name, kind, engine in outside:
             if kind == "database":
                 target = next((n for n, e in databases.items() if e == engine), None)
+                if target is None and not engine and databases:
+                    target = next(iter(databases))  # code that uses "a database" uses the one the repository declares
                 if target is None:
                     target = name
                     new_dbs.setdefault(target, engine or "database")
@@ -471,7 +495,7 @@ def _expand_monolith(repo: Path, services: dict[str, dict], databases: dict[str,
             new_aliases.update({f"{address}/api/{m.split('.', 1)[1]}": m for m in new_services if m.startswith("api.")})
     changes = _git_module_changes(repo, since, found["module_of"], set(new_services))
     return {"services": new_services, "databases": new_dbs, "deps": new_deps, "aliases": new_aliases, "changes": changes,
-            "prefix": found["prefix"]}
+            "prefix": found["prefix"], "tool": found.get("tool")}
 
 
 def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
@@ -493,6 +517,7 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
             return ""
         return os.path.relpath((base / rel).resolve(), repo)
 
+    root_built: set[str] = set()
     if compose is not None:
         specs = compose.get("services") or {}
         for name, spec in specs.items():
@@ -513,6 +538,8 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
             if engine:
                 databases[name] = engine
                 continue
+            if build and context in ("", "."):
+                root_built.add(name)
             tier = labels.get("sentinel.tier", "medium")
             services[name] = {
                 "name": name, "path": rel,
@@ -533,10 +560,19 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
             for value in _as_dict(spec.get("environment")).values():
                 targets |= {h for h in re.findall(r"(?:://|@|^)([a-z0-9][a-z0-9_-]*)(?::\d+|/|$)", value) if h in names}
             deps |= {(name, t) for t in targets if t != name and t in names}
+        if len(services) == 1 and next(iter(services)) in root_built:
+            next(iter(services.values()))["path"] = ""  # one app built from the whole repository: map what is inside it
+        if not services and databases and _has_code(repo):
+            # Compose only runs the data stores; the app itself runs from the repository (a Spring Boot or Rails app in
+            # development). The app is the repository, and it uses those stores.
+            name = re.sub(r"[^a-z0-9-]+", "-", repo.name.lower()).strip("-") or "app"
+            services[name] = {"name": name, "path": "", "language": _language(repo) or dominant_language(repo), "tier": "medium",
+                              "revenue_per_min": 0, "team": _owner(rules, ""), "published": False, "layer": None}
+            deps |= {(name, db) for db in databases}
     elif k8s is not None:
         services, databases, deps = k8s["services"], k8s["databases"], k8s["deps"]
         aliases, ignored = k8s["aliases"], k8s["ignored"]
-    else:
+    elif workspaces.find(repo) is None:
         for parent in SERVICE_DIRS:
             folder = repo / parent
             if not folder.is_dir():
@@ -544,13 +580,25 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
             for d in sorted(folder.iterdir()):
                 if parent == "." and d.name in CODE_ROOTS:
                     continue  # `src/` holds services, it is not one
+                if parent == "." and AUX_DIRS.match(d.name):
+                    continue  # tests, docs and examples next to the product are not part of it
                 if d.is_dir() and not d.name.startswith(".") and (lang := _language(d, deep=False)):
                     rel = d.relative_to(repo).as_posix()
                     services[d.name] = {"name": d.name, "path": rel, "language": lang, "tier": "medium",
                                         "revenue_per_min": 0, "team": _owner(rules, rel), "published": False,
                                         "layer": None}
+        if services and _language(repo, deep=False):
+            # The root is an app of its own (go.mod, package.json, pom.xml at the top) with its code beside the folders found
+            # (PocketBase: Go code at the root, an admin UI in ui/). Then the repository is that one app, folders included.
+            inside = tuple(s["path"] + "/" for s in services.values())
+            # Code in folders of its own (loose files at the root are mostly config: vite.config.ts, eslint.config.js).
+            if sum(1 for r in _source_files(repo) if "/" in r and not r.startswith(inside)) >= 3:
+                services = {}
 
     if compose is None and k8s is None and not services and _has_files(repo):
+        if not _has_code(repo):
+            raise ValueError(f"{repo.name} has no source code to map: no files in a programming language and no project "
+                             "manifest (package.json, go.mod, pom.xml, ...). Pick the folder that holds the project's code.")
         # No compose file and no services folders: the repository is one application, whatever it is written in. (A mobile app, a
         # library, a CLI, a monorepo with its own layout.) Never refuse: its modules are mapped below from the code.
         name = re.sub(r"[^a-z0-9-]+", "-", repo.name.lower()).strip("-") or "app"
@@ -579,7 +627,7 @@ def scan(repo: Path, since: str = "30 days ago") -> dict[str, Any]:
                     _git_changes(repo, {s["name"]: s["path"] for s in services.values()}, since)),
         "module_prefix": expanded["prefix"] if expanded else "",
         "source": ("docker-compose" if compose is not None else "kubernetes" if k8s is not None else "directories")
-                  + (" + code imports" if expanded else ""),
+                  + ((f" + {expanded['tool']}" if expanded.get("tool") else " + code imports") if expanded else ""),
     }
 
 

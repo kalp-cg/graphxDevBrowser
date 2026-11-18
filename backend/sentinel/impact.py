@@ -41,6 +41,9 @@ def service_for_file(manifest: dict[str, Any], rel: str) -> str | None:
     names = {s["name"] for s in services}
     if any(s.get("kind") == "module" for s in services):
         m = module_of(rel, manifest.get("module_prefix", ""))
+        by_file = f"{m}.{Path(rel).stem.lstrip('_')}"  # a flat package mapped file by file (`lib.api`)
+        if by_file in names:
+            return by_file
         if m in names:
             return m
         best, best_len = None, -1   # a module's folder, when its name does not follow the usual rule

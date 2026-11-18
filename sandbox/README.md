@@ -1,12 +1,12 @@
 # Sandbox: the whole product on a live system, no cloud account
 
 A small but real microservice shop (`shop/`) runs on your machine, sends OpenTelemetry traces to SentinelGraph,
-and can be broken and fixed on command. SentinelGraph runs on its embedded graph engine (`GRAPH_BACKEND=local`),
-so nothing needs TigerGraph Cloud, an LLM key or Docker.
+and can be broken and fixed on command. SentinelGraph runs on its embedded graph engine,
+so nothing needs a graph database, an LLM key or Docker.
 
 ```bash
 cd backend && python -m venv .venv && .venv/bin/pip install -r requirements.txt && cd ..
-backend/.venv/bin/python sandbox/run.py up          # add --ui for the web dashboard on :3002
+backend/.venv/bin/python sandbox/run.py up
 ```
 
 | What | Where |
@@ -14,9 +14,8 @@ backend/.venv/bin/python sandbox/run.py up          # add --ui for the web dashb
 | Storefront (browse it in DevBrowser) | http://localhost:7400 |
 | SentinelGraph API | http://localhost:8200 |
 | Shop control (faults, rollback) | http://localhost:7499/__control |
-| Dashboard (`up --ui`) | http://localhost:3002 |
 
-The ports are separate from the dev stack (8100/3001), so both can run at once. Port 7000 is avoided on purpose:
+The ports are separate from the dev stack (8100), so both can run at once. Port 7000 is avoided on purpose:
 macOS AirPlay Receiver holds it.
 
 ## What `up` does
@@ -46,8 +45,8 @@ recognised as a repeat.
 ## With DevBrowser
 
 1. `cd DevBrowser && npm run dev`
-2. Settings → Integrations → SentinelGraph: `http://localhost:8200`. The connection is
-   saved and restored on the next launch.
+2. Settings → Integrations → SentinelGraph: `http://localhost:8200` (DevBrowser connects to its own server on 8100 by
+   itself; the sandbox has its own). The connection is saved and restored on the next launch.
 3. Browse http://localhost:7400. Captured calls land on the scanned services (`web` → `gateway`), not on
    anonymous hosts. Passive browsing only shapes the graph; it never changes health or fires alerts.
 4. `python sandbox/run.py break inventory`, then click **Checkout** in the storefront.
@@ -83,15 +82,27 @@ In DevBrowser: Settings → connect to the API (`http://localhost:8200`), then *
 the graph. The API must run on the same machine as the folder; for a remote API use
 `python -m sentinel.ingest codebase PATH --push URL`.
 
-What it reads: `docker-compose.yml` (`depends_on`, `links`, service URLs in `environment`), CODEOWNERS, `sentinel.*`
-labels and `git log`. Good open-source repos to try, as they ship a compose file with many services:
-`open-telemetry/opentelemetry-demo`, `GoogleCloudPlatform/microservices-demo` (Kubernetes manifests only: no compose, so
-services come from directories), and `microservices-patterns/ftgo-application`. Real runtime calls come from traces
+What it reads: Docker Compose and Kubernetes manifests (services, data stores, the calls between them), the workspaces a
+monorepo declares (npm/Yarn/pnpm, Gradle, Swift Package Manager, Cargo, Maven, .NET, Go), and for a single app its modules
+and imports in any common language; plus CODEOWNERS, `sentinel.*` labels and `git log`. Real runtime calls come from traces
 (`POST /v1/traces`) and from browsing the running app in DevBrowser.
+
+## The codebase sandbox: does it work on real repositories?
+
+```bash
+backend/.venv/bin/python sandbox/codebases.py            # all 20 (downloads them once into sandbox/.codebases/)
+backend/.venv/bin/python sandbox/codebases.py --only go  # some
+```
+
+It scans 20 public repositories of every shape exactly as **Connect codebase** does and checks each map says something:
+Kubernetes and Compose microservices (Online Boutique, OpenTelemetry Demo, PetClinic microservices, ...), single apps in
+Java, TypeScript, Python, Ruby, PHP, Go and Svelte, monorepos (Excalidraw, ripgrep, Now in Android), a Swift package, a
+.NET solution, a Python library, and a repository with no code at all (which must be refused with a reason). The
+downloaded repositories are only read, never run. Current result: 20 of 20, each in under half a second.
 
 ## Demo flow from DevBrowser (healthy, then broken)
 
-SentinelGraph panel → type a service in **Find a service** (or click it) → under **Simulate a failure** choose
+**System map** → type a service in **Find a service** (or click it) → under **Simulate a failure** choose
 **Ship a bad deploy**, **Crash it** or **Degrade it**. On the sandbox this breaks the running shop for real, and the
 API waits until the failing traces have become alerts, so **Investigate** finds the incident straight away. Then
 approve the proposed fix (the shop really heals) or press **Restore healthy**. Investigating a healthy system

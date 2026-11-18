@@ -245,7 +245,7 @@ def test_browser_traffic_lands_on_scanned_services():
 
 @pytest.fixture
 def api(graph, monkeypatch):
-    monkeypatch.setenv("TG_GRAPH", TEST_GRAPH)  # the agent's MCP tool server is a subprocess
+    monkeypatch.setenv("SENTINEL_GRAPH", TEST_GRAPH)  # the agent's MCP tool server is a subprocess
     for target in ("sentinel.api.main.get_graph", "sentinel.api.graph_view.get_graph",
                    "sentinel.tools.common.get_graph", "sentinel.seed.scenarios.get_graph"):
         monkeypatch.setattr(target, lambda name=None: graph)
@@ -497,14 +497,19 @@ def test_a_folder_that_only_wraps_the_code_is_not_a_module(tmp_path):
 @pytest.mark.parametrize("files, language", [
     ({"main.go": "package main\nfunc main() {}", "go.mod": "module x"}, "go"),
     ({"src/lib.rs": "pub struct Engine {}", "Cargo.toml": "[package]"}, "rust"),
-    ({"README.md": "# just docs"}, ""),
     ({"a.c": "int main(){}"}, "c"),
 ])
-def test_any_repository_scans_to_something_and_never_raises(tmp_path, files, language):
+def test_any_repository_with_code_scans_to_something(tmp_path, files, language):
     _write(tmp_path / "proj", files)
     m = codebase.scan(tmp_path / "proj")
     assert m["services"], "a repository is at least one application"
     assert m["services"][0]["language"] == language
+
+
+def test_a_folder_without_code_says_so_instead_of_inventing_an_app(tmp_path):
+    _write(tmp_path / "notes", {"README.md": "# just docs", "ideas.txt": "later"})
+    with pytest.raises(ValueError, match="no source code to map"):
+        codebase.scan(tmp_path / "notes")
 
 
 def test_test_folders_are_not_modules(tmp_path):
